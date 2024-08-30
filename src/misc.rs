@@ -2,7 +2,7 @@ use std::fs::remove_dir_all;
 use std::io::{stdout, Write};
 use std::path::PathBuf;
 use std::thread;
-use std::time;
+use std::time::Duration;
 use validators::prelude::*;
 use validators::url::Url;
 
@@ -50,7 +50,7 @@ fn checkdep(dep: &str) {
 }
 
 pub fn sleep(secs: u32) {
-    let time = time::Duration::from_secs(secs.into());
+    let time = Duration::from_secs(secs.into());
     thread::sleep(time);
 }
 

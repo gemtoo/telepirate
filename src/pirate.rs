@@ -15,7 +15,6 @@ type DownloadsResult = Result<Downloads, Box<dyn Error + Send + Sync>>;
 pub struct Downloads {
     pub paths: Vec<PathBuf>,
     pub folder: PathBuf,
-    pub warnings: String,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -111,11 +110,9 @@ fn dl(url: String, args: Vec<Arg>, filetype: FileType) -> DownloadsResult {
     let absolute_destination_path = &format!("{}/{}", FILE_STORAGE, destination_basename)[..];
     let path = PathBuf::from(absolute_destination_path);
     let ytd = YoutubeDL::new(&path, args, &url)?;
-    let mut warnings: String = String::new();
     // This error is just warning because it could be that only a part of files weren't downloaded.
     if let Err(e) = ytd.download() {
         warn!("{}", &e);
-        warnings = e.to_string();
     }
     let mut paths: Vec<PathBuf> = Vec::new();
     let regex = Regex::new(r"(.*)(\.opus)").unwrap();
@@ -139,6 +136,7 @@ fn dl(url: String, args: Vec<Arg>, filetype: FileType) -> DownloadsResult {
                             .replace(":", "-")
                             .replace("T", "_")
                             .replace("Z", "");
+                        // Filename formatting that is used by Telegram when sending voice messages.
                         let newname =
                             format!("{}/audio_{}.ogg", absolute_destination_path, timestamp);
                         std::fs::rename(oldname, &newname)?;
@@ -162,7 +160,6 @@ fn dl(url: String, args: Vec<Arg>, filetype: FileType) -> DownloadsResult {
     let downloads = Downloads {
         paths,
         folder: absolute_destination_path.into(),
-        warnings,
     };
     Ok(downloads)
 }

@@ -5,14 +5,14 @@ use crate::{
     pirate::{self, FileType},
 };
 use dptree::case;
+use reqwest::Client;
 use std::error::Error;
+use std::time::Duration;
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
 use teloxide::types::ChatKind;
 use teloxide::types::InputFile;
-use teloxide::{
-    dispatching::UpdateHandler, prelude::*, utils::command::BotCommands,
-};
+use teloxide::{dispatching::UpdateHandler, prelude::*, utils::command::BotCommands};
 use tokio::task;
 
 type HandlerResult = Result<(), Box<dyn Error + Send + Sync>>;
@@ -41,7 +41,11 @@ enum Command {
 
 async fn bot_init() -> Result<Bot, Box<dyn Error>> {
     debug!("Initializing the bot ...");
-    let bot = Bot::from_env().set_api_url("http://telegram-api:8081".parse()?);
+    let bot_token = std::env::var("TELOXIDE_TOKEN")?;
+    let client = Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()?;
+    let bot = Bot::with_client(bot_token, client).set_api_url("http://telegram-api:8081".parse()?);
     Ok(bot)
 }
 
@@ -207,41 +211,9 @@ async fn process_request(
                 send_and_remember_msg(&bot, chat_id, &db, &error.to_string()).await;
             }
             Ok(files) => {
-                if files.warnings.len() != 0 {
-                    send_and_remember_msg(bot, chat_id, db, &files.warnings).await;
+                for path in files.paths.iter() {
+                    send_file(path, &username, &filetype, bot, chat_id, db).await;
                 }
-                for path in files.paths.into_iter() {
-                    let file = InputFile::file(&path);
-                    let filename = path.file_name().unwrap().to_str().unwrap();
-                    trace!("Sending '{}' to @{} ...", filename, &username);
-                    match &filetype {
-                        FileType::Mp3 => {
-                            if let Err(error) = bot.send_audio(chat_id, file).await {
-                                let error_text = format!("{}", error);
-                                send_and_remember_msg(bot, chat_id, db, &error_text).await;
-                            }
-                        }
-                        FileType::Mp4 => {
-                            if let Err(error) = bot.send_video(chat_id, file).await {
-                                let error_text = format!("{}", error);
-                                send_and_remember_msg(bot, chat_id, db, &error_text).await;
-                            }
-                        }
-                        FileType::Voice => {
-                            if let Err(error) = bot.send_voice(chat_id, file).await {
-                                let error_text = format!("{}", error);
-                                send_and_remember_msg(bot, chat_id, db, &error_text).await;
-                            }
-                        }
-                        FileType::Gif => {
-                            if let Err(error) = bot.send_animation(chat_id, file).await {
-                                let error_text = format!("{}", error);
-                                send_and_remember_msg(bot, chat_id, db, &error_text).await;
-                            }
-                        }
-                    }
-                }
-                info!("Files have been delivered to @{}.", &username);
                 purge_trash_messages(chat_id, db, &bot).await?;
                 cleanup(files.folder);
             }
@@ -265,13 +237,60 @@ async fn process_request(
     Ok(())
 }
 
+use std::path::PathBuf;
+async fn send_file(
+    path: &PathBuf,
+    username: &str,
+    filetype: &FileType,
+    bot: &Bot,
+    chat_id: ChatId,
+    db: &Surreal<Db>,
+) {
+    let file = InputFile::file(path);
+    let filename = path.file_name().unwrap().to_str().unwrap();
+    trace!("Sending '{}' to @{} ...", filename, &username);
+    let sending_result;
+    match filetype {
+        FileType::Mp3 => {
+            sending_result = bot.send_audio(chat_id, file).await;
+        }
+        FileType::Mp4 => {
+            sending_result = bot.send_video(chat_id, file).await;
+        }
+        FileType::Voice => {
+            sending_result = bot.send_voice(chat_id, file).await;
+        }
+        FileType::Gif => {
+            sending_result = bot.send_animation(chat_id, file).await;
+        }
+    }
+    match sending_result {
+        Ok(_) => {
+            info!(
+                "File '{}' has been successfully delivered to @{}.",
+                filename, username
+            );
+            return;
+        }
+        Err(error) => {
+            let error_text = format!("File sending error: {}", error);
+            warn!("{}", error_text);
+            send_and_remember_msg(bot, chat_id, db, &error_text).await;
+        }
+    }
+}
+
 async fn send_and_remember_msg(bot: &Bot, chat_id: ChatId, db: &Surreal<Db>, text: &str) {
     let text_chunks = split_text(text);
     let mut chunk_index: usize = 0;
     debug!("Message chunks to send: {}.", text_chunks.len());
     for chunk in text_chunks {
         chunk_index += 1;
-        trace!("Sending text message {} of length {} ...", chunk_index, chunk.len());
+        trace!(
+            "Sending text message {} of length {} ...",
+            chunk_index,
+            chunk.len()
+        );
         let message_result = bot.send_message(chat_id, chunk).await;
         match message_result {
             Ok(message) => {
@@ -290,7 +309,8 @@ async fn send_and_remember_msg(bot: &Bot, chat_id: ChatId, db: &Surreal<Db>, tex
 fn split_text(text: &str) -> Vec<String> {
     trace!("Splitting text into sendable chunks ...");
     if text.len() > 4096 {
-        let stringvec = text.as_bytes()
+        let stringvec = text
+            .as_bytes()
             .chunks(4096)
             .map(|chunk| String::from_utf8_lossy(chunk).to_string())
             .collect::<Vec<String>>();
