@@ -1,0 +1,31 @@
+[package]
+name = "telepirate"
+version = "1.2.5"
+edition = "2021"
+
+[profile.dev]
+strip = true
+opt-level = 0
+codegen-units = 256
+
+[profile.release]
+strip = true
+opt-level = 0
+codegen-units = 256
+
+[dependencies]
+colored = { version = "2.0.0", features = ["no-color"] }
+ctrlc = { version = "3.4.4", features = ["termination"] }
+fern = { version = "0.6.2", features = ["colored"] }
+glob = "0.3.1"
+humantime = "2.1.0"
+log = "0.4.19"
+regex = "1.9.5"
+serde = { version = "1.0.188", features = ["derive"] }
+serde_json = "1.0.105"
+surrealdb = { version = "1.5.3", default-features = false, features = ["kv-mem"] }
+teloxide = { version = "0.12.2", features = ["webhooks-axum", "macros"] }
+tokio = { version = "1.29.0", features = ["rt-multi-thread", "macros"] }
+uuid = { version = "1.9.1", default-features = false, features = ["v4"] }
+validators = { version = "0.25.3", features = ["url", "derive", "http_url"], default-features = false }
+ytd-rs = { version = "0.1.7", features = ["yt-dlp"] }
