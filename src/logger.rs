@@ -1,8 +1,3 @@
-// cargo add log humantime && cargo add colored -F no-color && cargo add fern -F colored
-// Must be used globally in root:
-// #[macro_use] extern crate log;
-// pub const CRATE_NAME: &str = module_path!();
-
 use crate::CRATE_NAME;
 use fern;
 use fern::colors::{Color, ColoredLevelConfig};
@@ -31,14 +26,12 @@ pub fn init() {
                 "[ {} {} ] {}",
                 time,
                 level,
-                //record.target(),
                 message
             ))
         })
         .level(log::LevelFilter::Off)
         .level_for(CRATE_NAME.replace("-", "_"), log::LevelFilter::Trace)
         .chain(std::io::stdout())
-        .chain(fern::log_file("debug.log").unwrap())
         .apply()
         .unwrap();
     info!("Started up.");

@@ -43,7 +43,7 @@ async fn bot_init() -> Result<Bot, Box<dyn Error>> {
     debug!("Initializing the bot ...");
     let bot_token = std::env::var("TELOXIDE_TOKEN")?;
     let client = Client::builder()
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_secs(360))
         .build()?;
     let bot = Bot::with_client(bot_token, client).set_api_url("http://telegram-api:8081".parse()?);
     Ok(bot)
@@ -194,10 +194,10 @@ async fn process_request(
     let chat_id = msg_from_user.chat.id;
     let msg_id = msg_from_user.id;
     let username = getuser(&msg_from_user);
+    info!("User @{} asked for /{}.", &username, filetype.as_str());
     database::intodb(chat_id, msg_id, &db).await?;
     if url_is_valid(&url) {
         send_and_remember_msg(&bot, chat_id, db, "Please wait ...").await;
-        info!("User @{} asked for /{}.", &username, filetype.as_str());
         let downloads_result = match &filetype {
             FileType::Mp3 => task::spawn_blocking(move || pirate::mp3(url)).await,
             FileType::Mp4 => task::spawn_blocking(move || pirate::mp4(url)).await,
@@ -283,7 +283,7 @@ async fn send_file(
 async fn send_and_remember_msg(bot: &Bot, chat_id: ChatId, db: &Surreal<Db>, text: &str) {
     let text_chunks = split_text(text);
     let mut chunk_index: usize = 0;
-    debug!("Message chunks to send: {}.", text_chunks.len());
+    trace!("Message chunks to send: {}.", text_chunks.len());
     for chunk in text_chunks {
         chunk_index += 1;
         trace!(

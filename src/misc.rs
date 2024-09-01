@@ -15,7 +15,7 @@ pub struct HttpURL {
 }
 
 pub fn cleanup(absolute_destination_path: PathBuf) {
-    debug!(
+    trace!(
         "Deleting the working directory {} ...",
         absolute_destination_path.to_str().unwrap()
     );

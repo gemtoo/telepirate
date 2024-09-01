@@ -104,7 +104,7 @@ pub fn gif(url: String) -> DownloadsResult {
 }
 
 fn dl(url: String, args: Vec<Arg>, filetype: FileType) -> DownloadsResult {
-    trace!("Downloading {}(s) from {} ...", filetype.as_str(), url);
+    debug!("Downloading {}(s) from {} ...", filetype.as_str(), url);
     // UUID is used because thats my choice.
     let destination_basename = Uuid::new_v4();
     let absolute_destination_path = &format!("{}/{}", FILE_STORAGE, destination_basename)[..];
@@ -151,7 +151,7 @@ fn dl(url: String, args: Vec<Arg>, filetype: FileType) -> DownloadsResult {
         }
     }
     let file_amount = paths.len();
-    info!("{} {}(s) to send.", file_amount, filetype.as_str());
+    trace!("{} {}(s) to send.", file_amount, filetype.as_str());
     if file_amount == 0 {
         cleanup(absolute_destination_path.into());
         let error_text = "For some reason, no files were downloaded.";
