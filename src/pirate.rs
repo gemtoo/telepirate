@@ -110,10 +110,7 @@ fn dl(url: String, args: Vec<Arg>, filetype: FileType) -> DownloadsResult {
     let absolute_destination_path = &format!("{}/{}", FILE_STORAGE, destination_basename)[..];
     let path = PathBuf::from(absolute_destination_path);
     let ytd = YoutubeDL::new(&path, args, &url)?;
-    // This error is just warning because it could be that only a part of files weren't downloaded.
-    if let Err(e) = ytd.download() {
-        warn!("{}", &e);
-    }
+    let ytdresult = ytd.download();
     let mut paths: Vec<PathBuf> = Vec::new();
     let regex = Regex::new(r"(.*)(\.opus)").unwrap();
     let fileformat = filetype.as_str();
@@ -154,7 +151,19 @@ fn dl(url: String, args: Vec<Arg>, filetype: FileType) -> DownloadsResult {
     trace!("{} {}(s) to send.", file_amount, filetype.as_str());
     if file_amount == 0 {
         cleanup(absolute_destination_path.into());
-        let error_text = "For some reason, no files were downloaded.";
+        // If no files were downloaded, yt-dlp most likely will provide info. 
+        // Otherwise the reason is unknown and requres more in-depth debugging.
+        let mut error_text;
+        match ytdresult {
+            Ok(_) => {
+                error_text = "For an unknown reason, no files were downloaded.".to_string();
+                error!("{}", error_text);
+            }
+            Err(e) => {
+                warn!("{}", &e);
+                error_text = e.to_string();
+            }
+        }
         return Err(error_text.into());
     }
     let downloads = Downloads {

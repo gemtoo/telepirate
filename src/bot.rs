@@ -97,9 +97,9 @@ async fn start(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResu
     let msg_id = msg_from_user.id;
     let username = getuser(&msg_from_user);
     let command_descriptions = Command::descriptions().to_string();
+    info!("User @{} has /start'ed the bot.", username);
     send_and_remember_msg(&bot, chat_id, &db, &command_descriptions).await;
     database::intodb(chat_id, msg_id, &db).await?;
-    info!("User @{} has /start'ed the bot.", username);
     Ok(())
 }
 
@@ -108,9 +108,9 @@ async fn help(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResul
     let msg_id = msg_from_user.id;
     let username = getuser(&msg_from_user);
     let command_descriptions = Command::descriptions().to_string();
+    info!("User @{} asked for /help.", username);
     send_and_remember_msg(&bot, chat_id, &db, &command_descriptions).await;
     database::intodb(chat_id, msg_id, &db).await?;
-    info!("User @{} asked for /help.", username);
     Ok(())
 }
 
@@ -141,9 +141,9 @@ async fn gif(url: String, bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> 
 async fn clear(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
     let chat_id = msg_from_user.chat.id;
     let msg_id = msg_from_user.id;
-    database::intodb(chat_id, msg_id, &db).await?;
     purge_trash_messages(chat_id, &db, &bot).await?;
     info!("User @{} has cleaned up the chat.", getuser(&msg_from_user));
+    database::intodb(chat_id, msg_id, &db).await?;
     Ok(())
 }
 
