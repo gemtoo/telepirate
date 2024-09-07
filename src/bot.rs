@@ -200,8 +200,7 @@ async fn process_request(
     info!("User @{} asked for /{}.", &username, filetype.as_str());
     database::intodb(chat_id, msg_id, &db).await?;
     if url_is_valid(&url) {
-        let please_wait_text = "Downloading... Please wait.";
-        send_and_remember_msg(&bot, chat_id, db, please_wait_text).await;
+        send_and_remember_msg(&bot, chat_id, db, "Downloading... Please wait.").await;
         let last_message_id = get_last_message_id(chat_id, db).await?;
         // UUID is used because thats my choice.
         let download_id = Uuid::new_v4();
@@ -373,17 +372,16 @@ async fn run_directory_size_poller_and_mesage_updater(
                     );
                     trace!("{}", &current_directory_size_megabytes_formatted);
                     let update_text = format!(
-                        "Downloading ... Please wait.\n{}.",
+                        "Downloading ... Please wait.\n{}",
                         &current_directory_size_megabytes_formatted
                     );
                     // Telegram doesn't allow updating a message if content hasn't changed.
                     if update_text != previous_update_text {
                         previous_update_text = update_text.clone();
-                        trace!("Trying to update a message in Chat ID {} ...", chat_id);
+                        trace!("Updating a message in Chat ID {} ...", chat_id);
                         if let Err(w) = bot.edit_message_text(chat_id, last_message_id, update_text).await {
                             warn!("Message in Chat ID {} wasn't updated: {}", chat_id, w);
                         }
-                        trace!("Update in Chat ID {} was successful.", chat_id);
                     }
                     } => {}
                     // When a channel receives a change this means that a task should finalize.

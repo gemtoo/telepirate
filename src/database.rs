@@ -60,7 +60,7 @@ pub async fn get_last_message_id(
     let database_name = generate_database_name_from_chat(chat_id);
     let sql = &format!("math::max(SELECT VALUE message_id FROM {});", database_name);
     trace!(
-        "Retrieving last Message ID of Chat ID {} from the database ...",
+        "Retrieving last Message ID of Chat ID {} from the DB ...",
         chat_id.0
     );
     let mut query_response = db.query(sql).await.unwrap();
