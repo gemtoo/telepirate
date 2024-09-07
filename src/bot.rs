@@ -227,13 +227,13 @@ async fn process_request(
                 send_and_remember_msg(&bot, chat_id, &db, &error.to_string()).await;
             }
             Ok(files) => {
+                trace!("All files are ready. Finishing poller task for Chat ID {} ...", chat_id);
+                let _ = tx.send(true);
+                poller_handle.await?;
                 for path in files.paths.iter() {
                     send_file(path, &username, &filetype, bot, chat_id, db).await;
                 }
                 purge_trash_messages(chat_id, db, &bot).await?;
-                trace!("Finishing poller task for Chat ID {} ...", chat_id);
-                let _ = tx.send(true);
-                poller_handle.await?;
                 cleanup(files.folder);
             }
         }
@@ -347,10 +347,7 @@ async fn run_directory_size_poller_and_mesage_updater(
     download_id: Uuid,
     bot: Bot,
 ) -> tokio::task::JoinHandle<()> {
-    debug!(
-        "Starting concurrent poller task for Chat ID {} ...",
-        chat_id
-    );
+    debug!("Starting poller task for Chat ID {}, Download ID {} ...", chat_id, &download_id);
     let poller_handle = tokio::task::spawn({
         async move {
             let path_to_downloads = pirate::construct_destination_path(&download_id);
@@ -367,27 +364,27 @@ async fn run_directory_size_poller_and_mesage_updater(
                     // Unwrap because this directory should already exist. Triggering previous unwrap woudn't get us here.
                     let current_directory_size_bytes = misc::get_directory_size(&path_to_downloads).unwrap();
                     let current_directory_size_megabytes_formatted = format!(
-                        "Current size of downloads folder: {:.2} MB.",
+                        "{:.2} MB",
                         current_directory_size_bytes as f64 / (1024.0 * 1024.0)
                     );
-                    trace!("{}", &current_directory_size_megabytes_formatted);
+                    trace!("Download ID {}. Current size: {}.", &download_id, &current_directory_size_megabytes_formatted);
                     let update_text = format!(
-                        "Downloading ... Please wait.\n{}",
+                        "Downloading ... Please wait.\nCurrent size of downloads folder: {}.",
                         &current_directory_size_megabytes_formatted
                     );
                     // Telegram doesn't allow updating a message if content hasn't changed.
                     if update_text != previous_update_text {
                         previous_update_text = update_text.clone();
-                        trace!("Updating a message in Chat ID {} ...", chat_id);
+                        trace!("Updating a message in Chat ID {}, regarding Download ID {} ...", chat_id, &download_id);
                         if let Err(w) = bot.edit_message_text(chat_id, last_message_id, update_text).await {
-                            warn!("Message in Chat ID {} wasn't updated: {}", chat_id, w);
+                            warn!("Message in Chat ID {} related to Download ID {} wasn't updated: {}", chat_id, &download_id, w);
                         }
                     }
                     } => {}
                     // When a channel receives a change this means that a task should finalize.
                     _ = rx.changed() => {
                     if *rx.borrow() {
-                        trace!("Poller task for Chat ID {} done.", chat_id);
+                        trace!("Poller task for Download ID {} done.", &download_id);
                         break;
                     }
                 }
