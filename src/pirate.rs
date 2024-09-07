@@ -37,7 +37,7 @@ impl FileType {
     }
 }
 
-pub fn mp3(url: String) -> DownloadsResult {
+pub fn mp3(url: String, download_id: &Uuid) -> DownloadsResult {
     let args = vec![
         Arg::new_with_arg("--concurrent-fragments", "100000"),
         Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
@@ -50,11 +50,11 @@ pub fn mp3(url: String) -> DownloadsResult {
         Arg::new_with_arg("--audio-quality", "0"),
     ];
     let filetype = FileType::Mp3;
-    let downloaded = dl(url, args, filetype)?;
+    let downloaded = dl(url, args, filetype, download_id)?;
     Ok(downloaded)
 }
 
-pub fn mp4(url: String) -> DownloadsResult {
+pub fn mp4(url: String, download_id: &Uuid) -> DownloadsResult {
     let args = vec![
         Arg::new_with_arg("--concurrent-fragments", "100000"),
         Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
@@ -66,11 +66,11 @@ pub fn mp4(url: String) -> DownloadsResult {
         Arg::new_with_arg("--format", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"),
     ];
     let filetype = FileType::Mp4;
-    let downloaded = dl(url, args, filetype)?;
+    let downloaded = dl(url, args, filetype, download_id)?;
     Ok(downloaded)
 }
 
-pub fn ogg(url: String) -> DownloadsResult {
+pub fn ogg(url: String, download_id: &Uuid) -> DownloadsResult {
     let args = vec![
         Arg::new_with_arg("--concurrent-fragments", "100000"),
         Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
@@ -82,11 +82,11 @@ pub fn ogg(url: String) -> DownloadsResult {
         Arg::new_with_arg("--audio-quality", "64K"),
     ];
     let filetype = FileType::Voice;
-    let downloaded = dl(url, args, filetype)?;
+    let downloaded = dl(url, args, filetype, download_id)?;
     Ok(downloaded)
 }
 
-pub fn gif(url: String) -> DownloadsResult {
+pub fn gif(url: String, download_id: &Uuid) -> DownloadsResult {
     let args = vec![
         Arg::new_with_arg("--concurrent-fragments", "100000"),
         Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
@@ -99,15 +99,18 @@ pub fn gif(url: String) -> DownloadsResult {
         Arg::new_with_arg("--format", "bv"),
     ];
     let filetype = FileType::Gif;
-    let downloaded = dl(url, args, filetype)?;
+    let downloaded = dl(url, args, filetype, download_id)?;
     Ok(downloaded)
 }
 
-fn dl(url: String, args: Vec<Arg>, filetype: FileType) -> DownloadsResult {
+pub fn construct_destination_path(download_id: &Uuid) -> String {
+    return format!("{}/{}", FILE_STORAGE, download_id);
+}
+
+fn dl(url: String, args: Vec<Arg>, filetype: FileType, download_id: &Uuid) -> DownloadsResult {
     debug!("Downloading {}(s) from {} ...", filetype.as_str(), url);
-    // UUID is used because thats my choice.
-    let destination_basename = Uuid::new_v4();
-    let absolute_destination_path = &format!("{}/{}", FILE_STORAGE, destination_basename)[..];
+    // UUID is used to name path so that a second concurrent Tokio task can gather info from that path.
+    let absolute_destination_path = &construct_destination_path(download_id);
     let path = PathBuf::from(absolute_destination_path);
     let ytd = YoutubeDL::new(&path, args, &url)?;
     let ytdresult = ytd.download();
@@ -151,9 +154,9 @@ fn dl(url: String, args: Vec<Arg>, filetype: FileType) -> DownloadsResult {
     trace!("{} {}(s) to send.", file_amount, filetype.as_str());
     if file_amount == 0 {
         cleanup(absolute_destination_path.into());
-        // If no files were downloaded, yt-dlp most likely will provide info. 
+        // If no files were downloaded, yt-dlp most likely will provide info.
         // Otherwise the reason is unknown and requres more in-depth debugging.
-        let mut error_text;
+        let error_text;
         match ytdresult {
             Ok(_) => {
                 error_text = "For an unknown reason, no files were downloaded.".to_string();

@@ -1,6 +1,6 @@
-use crate::misc::url_is_valid;
+use crate::misc::{self, url_is_valid};
 use crate::{
-    database::{self, forget_deleted_messages},
+    database::{self, forget_deleted_messages, get_last_message_id},
     misc::{cleanup, sleep},
     pirate::{self, FileType},
 };
@@ -12,8 +12,10 @@ use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
 use teloxide::types::ChatKind;
 use teloxide::types::InputFile;
+use teloxide::types::MessageId;
 use teloxide::{dispatching::UpdateHandler, prelude::*, utils::command::BotCommands};
 use tokio::task;
+use uuid::Uuid;
 
 type HandlerResult = Result<(), Box<dyn Error + Send + Sync>>;
 
@@ -141,9 +143,9 @@ async fn gif(url: String, bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> 
 async fn clear(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
     let chat_id = msg_from_user.chat.id;
     let msg_id = msg_from_user.id;
+    database::intodb(chat_id, msg_id, &db).await?;
     purge_trash_messages(chat_id, &db, &bot).await?;
     info!("User @{} has cleaned up the chat.", getuser(&msg_from_user));
-    database::intodb(chat_id, msg_id, &db).await?;
     Ok(())
 }
 
@@ -183,6 +185,7 @@ async fn purge_trash_messages(
     Ok(())
 }
 
+use tokio::sync::watch;
 async fn process_request(
     url: String,
     filetype: FileType,
@@ -197,14 +200,28 @@ async fn process_request(
     info!("User @{} asked for /{}.", &username, filetype.as_str());
     database::intodb(chat_id, msg_id, &db).await?;
     if url_is_valid(&url) {
-        send_and_remember_msg(&bot, chat_id, db, "Please wait ...").await;
+        let please_wait_text = "Downloading... Please wait.";
+        send_and_remember_msg(&bot, chat_id, db, please_wait_text).await;
+        let last_message_id = get_last_message_id(chat_id, db).await?;
+        // UUID is used because thats my choice.
+        let download_id = Uuid::new_v4();
+        // Channel is created because we need a way to exit a poller task after the request is done.
+        // This can be gracefully done only by sending a signal through the channel.
+        let (tx, rx) = watch::channel(false);
+        let poller_handle = run_directory_size_poller_and_mesage_updater(
+            rx,
+            chat_id,
+            last_message_id,
+            download_id,
+            bot.clone(),
+        )
+        .await;
         let downloads_result = match &filetype {
-            FileType::Mp3 => task::spawn_blocking(move || pirate::mp3(url)).await,
-            FileType::Mp4 => task::spawn_blocking(move || pirate::mp4(url)).await,
-            FileType::Voice => task::spawn_blocking(move || pirate::ogg(url)).await,
-            FileType::Gif => task::spawn_blocking(move || pirate::gif(url)).await,
+            FileType::Mp3 => task::spawn_blocking(move || pirate::mp3(url, &download_id)).await,
+            FileType::Mp4 => task::spawn_blocking(move || pirate::mp4(url, &download_id)).await,
+            FileType::Voice => task::spawn_blocking(move || pirate::ogg(url, &download_id)).await,
+            FileType::Gif => task::spawn_blocking(move || pirate::gif(url, &download_id)).await,
         }?;
-
         match downloads_result {
             Err(error) => {
                 warn!("{}", error);
@@ -215,6 +232,9 @@ async fn process_request(
                     send_file(path, &username, &filetype, bot, chat_id, db).await;
                 }
                 purge_trash_messages(chat_id, db, &bot).await?;
+                trace!("Finishing poller task for Chat ID {} ...", chat_id);
+                let _ = tx.send(true);
+                poller_handle.await?;
                 cleanup(files.folder);
             }
         }
@@ -319,4 +339,63 @@ fn split_text(text: &str) -> Vec<String> {
         let stringvec = vec![text.to_string()];
         return stringvec;
     }
+}
+
+async fn run_directory_size_poller_and_mesage_updater(
+    mut rx: watch::Receiver<bool>,
+    chat_id: ChatId,
+    last_message_id: MessageId,
+    download_id: Uuid,
+    bot: Bot,
+) -> tokio::task::JoinHandle<()> {
+    debug!(
+        "Starting concurrent poller task for Chat ID {} ...",
+        chat_id
+    );
+    let poller_handle = tokio::task::spawn({
+        async move {
+            let path_to_downloads = pirate::construct_destination_path(&download_id);
+            // As long as we run in Docker as root, there should be no issues with this unwrap.
+            std::fs::create_dir_all(&path_to_downloads).unwrap();
+            let mut previous_update_text: String = String::new();
+            // A loop that polls directory size and updates a last message in related chat.
+            loop {
+                tokio::select! {
+                    // This case handles the main logic while rx is false.
+                    _ = async {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    trace!("Polling data about Download ID {} ...", download_id);
+                    // Unwrap because this directory should already exist. Triggering previous unwrap woudn't get us here.
+                    let current_directory_size_bytes = misc::get_directory_size(&path_to_downloads).unwrap();
+                    let current_directory_size_megabytes_formatted = format!(
+                        "Current size of downloads folder: {:.2} MB.",
+                        current_directory_size_bytes as f64 / (1024.0 * 1024.0)
+                    );
+                    trace!("{}", &current_directory_size_megabytes_formatted);
+                    let update_text = format!(
+                        "Downloading ... Please wait.\n{}.",
+                        &current_directory_size_megabytes_formatted
+                    );
+                    // Telegram doesn't allow updating a message if content hasn't changed.
+                    if update_text != previous_update_text {
+                        previous_update_text = update_text.clone();
+                        trace!("Trying to update a message in Chat ID {} ...", chat_id);
+                        if let Err(w) = bot.edit_message_text(chat_id, last_message_id, update_text).await {
+                            warn!("Message in Chat ID {} wasn't updated: {}", chat_id, w);
+                        }
+                        trace!("Update in Chat ID {} was successful.", chat_id);
+                    }
+                    } => {}
+                    // When a channel receives a change this means that a task should finalize.
+                    _ = rx.changed() => {
+                    if *rx.borrow() {
+                        trace!("Poller task for Chat ID {} done.", chat_id);
+                        break;
+                    }
+                }
+                }
+            }
+        }
+    });
+    return poller_handle;
 }

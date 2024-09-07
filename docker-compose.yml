@@ -20,6 +20,8 @@ services:
       - TELEGRAM_API_ID=${TELEGRAM_API_ID}
       - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
     env_file: ./.env
+    volumes:
+      - ./telegram-bot-api-build-cache:/telegram-bot-api
     restart: always
 
 networks:

@@ -22,12 +22,7 @@ pub fn init() {
             if level.len() == 13 {
                 level += " ";
             }
-            out.finish(format_args!(
-                "[ {} {} ] {}",
-                time,
-                level,
-                message
-            ))
+            out.finish(format_args!("[ {} {} ] {}", time, level, message))
         })
         .level(log::LevelFilter::Off)
         .level_for(CRATE_NAME.replace("-", "_"), log::LevelFilter::Trace)

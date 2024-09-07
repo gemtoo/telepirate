@@ -9,3 +9,4 @@
 /src/surrealdb
 /src/downloads
 /.env
+/telegram-bot-api-build-cache

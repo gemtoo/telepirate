@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::fs::remove_dir_all;
 use std::io::{stdout, Write};
 use std::path::PathBuf;
@@ -56,4 +57,17 @@ pub fn sleep(secs: u32) {
 
 pub fn url_is_valid(url: &str) -> bool {
     return HttpURL::parse_string(url).is_ok();
+}
+
+use walkdir::WalkDir;
+pub fn get_directory_size(path_to_directory: &str) -> Result<u64, Box<dyn Error>> {
+    let mut total_size = 0;
+
+    for entry in WalkDir::new(path_to_directory) {
+        let entry = entry?;
+        if entry.file_type().is_file() {
+            total_size += std::fs::metadata(entry.path())?.len();
+        }
+    }
+    Ok(total_size)
 }
