@@ -72,6 +72,8 @@ async fn dispatcher(bot: Bot, db: Surreal<Db>) {
         .default_handler(|upd| async move {
             warn!("Unhandled update: {:?}", upd);
         })
+        // Allows for concurrent requests from the same user.
+        .distribution_function(|_| None::<std::convert::Infallible>)
         .build()
         .dispatch()
         .await;
