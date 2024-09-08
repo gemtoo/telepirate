@@ -57,7 +57,7 @@ pub async fn get_trash_messages_of_current_request_id(telepirate_request: &Telep
     let database_name = generate_database_name_from_chat(telepirate_request.chat_id());
     let request_id = telepirate_request.request_id();
     trace!("Selecting Message IDs of a Request ID {} from the database ...", &request_id);
-    let sql = &format!("SELECT msg_id.message_id FROM {} WHERE request_id == {};", database_name, request_id);
+    let sql = &format!("SELECT message_id FROM {} WHERE request_id == {};", database_name, request_id);
     // TODO replace unwrap with ?
     let mut query_response = db.query(sql).await.unwrap();
     let message_ids = query_response.take::<Vec<MessageId>>(0)?;
