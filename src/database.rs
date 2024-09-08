@@ -86,12 +86,11 @@ pub async fn forget_deleted_messages(
     Ok(())
 }
 
-pub async fn get_last_message_id(
-    chat_id: ChatId,
-    db: &Surreal<Db>,
-) -> Result<MessageId, Box<dyn Error + Send + Sync>> {
+pub async fn get_last_message_id(telepirate_request: &TelepirateRequest) -> Result<MessageId, Box<dyn Error + Send + Sync>> {
+    let db = telepirate_request.db();
+    let chat_id = telepirate_request.chat_id();
     let database_name = generate_database_name_from_chat(chat_id);
-    let sql = &format!("math::max(SELECT VALUE message_id FROM {});", database_name);
+    let sql = &format!("math::max(SELECT VALUE msg_id.message_id FROM {});", database_name);
     trace!(
         "Retrieving last Message ID of Chat ID {} from the DB ...",
         chat_id.0

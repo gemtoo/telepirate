@@ -263,7 +263,7 @@ impl TelepirateRequest {
         database::intodb(&self).await?;
         if url_is_valid(&url) {
             self.send_and_remember_msg("Downloading... Please wait.").await;
-            let last_message_id = get_last_message_id(chat_id, db).await?;
+            let last_message_id = get_last_message_id(&self).await?;
             // UUID is used because thats my choice.
             let download_id = Uuid::new_v4();
             // Channel is created because we need a way to exit a poller task after the request is done.
