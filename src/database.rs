@@ -1,8 +1,10 @@
 use crate::CRATE_NAME;
 use std::error::Error;
+use serde::{Serialize, Deserialize};
 use surrealdb::{engine::local::Db, engine::local::Mem, Surreal};
 use teloxide::types::{ChatId, MessageId};
 
+// Static lifetime is OK because the DB should live as long as the program.
 pub async fn initialize() -> &'static Surreal<Db> {
     debug!("Initializing database ...");
     let db_result = Surreal::new::<Mem>(()).await;
@@ -20,21 +22,51 @@ pub async fn initialize() -> &'static Surreal<Db> {
     }
 }
 
-pub async fn intodb(
-    chat_id: ChatId,
+use crate::bot::TelepirateRequest;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Record {
+    request_id: String,
     msg_id: MessageId,
-    db: &Surreal<Db>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let database_name = generate_database_name_from_chat(chat_id);
+}
+
+impl Record {
+    fn from_telepirate_request(telepirate_request: &TelepirateRequest) -> Self {
+        return Record {
+            request_id: telepirate_request.request_id(),
+            msg_id: telepirate_request.msg_id(),
+        };
+    }
+}
+
+pub async fn intodb(telepirate_request: &TelepirateRequest) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let db = telepirate_request.db();
     trace!(
         "Recording Message ID {} from Chat ID {} into DB ...",
-        msg_id.0,
-        chat_id.0
+        telepirate_request.msg_id().0,
+        telepirate_request.chat_id().0
     );
-    let _: Vec<MessageId> = db.create(database_name).content(msg_id).await?;
+    let record = Record::from_telepirate_request(&telepirate_request);
+    let database_name = generate_database_name_from_chat(telepirate_request.chat_id()); 
+    let _: Vec<Record> = db.create(database_name).content(record).await?;
     Ok(())
 }
 
+pub async fn get_trash_messages_of_current_request_id(telepirate_request: &TelepirateRequest) -> Result<Vec<MessageId>, Box<dyn Error + Send + Sync>> {
+    let db = telepirate_request.db();
+    let database_name = generate_database_name_from_chat(telepirate_request.chat_id());
+    let request_id = telepirate_request.request_id();
+    trace!("Selecting Message IDs of a Request ID {} from the database ...", &request_id);
+    let sql = &format!("SELECT msg_id.message_id FROM {} WHERE request_id == {};", database_name, request_id);
+    // TODO replace unwrap with ?
+    let mut query_response = db.query(sql).await.unwrap();
+    let message_ids = query_response.take::<Vec<MessageId>>(0)?;
+    Ok(message_ids)
+}
+
+//pub async fn get_trash_messages_all()
+
+// remove trash messages for current session id and for total /c are separate funcs
 pub async fn get_trash_message_ids(
     chat_id: ChatId,
     db: &Surreal<Db>,
@@ -64,7 +96,7 @@ pub async fn get_last_message_id(
         "Retrieving last Message ID of Chat ID {} from the DB ...",
         chat_id.0
     );
-    let mut query_response = db.query(sql).await.unwrap();
+    let mut query_response = db.query(sql).await?;
     let last_message_id = query_response.take::<Option<i32>>(0)?.unwrap();
     Ok(MessageId(last_message_id))
 }

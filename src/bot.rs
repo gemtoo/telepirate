@@ -4,9 +4,9 @@ use crate::{
     misc::{cleanup, sleep, split_text},
     pirate::{self, FileType},
 };
+use std::path::PathBuf;
 use dptree::case;
 use reqwest::Client;
-use surrealdb::sql::Field;
 use std::error::Error;
 use std::time::Duration;
 use surrealdb::engine::local::Db;
@@ -17,6 +17,7 @@ use teloxide::types::MessageId;
 use teloxide::{dispatching::UpdateHandler, prelude::*, utils::command::BotCommands};
 use tokio::task;
 use uuid::Uuid;
+use tokio::sync::watch;
 
 type HandlerResult = Result<(), Box<dyn Error + Send + Sync>>;
 
@@ -40,6 +41,7 @@ enum Command {
     C,
 }
 
+// Static lifetime is OK because the Bot should live as long as the program.
 async fn bot_init() -> Result<&'static Bot, Box<dyn Error>> {
     debug!("Initializing the bot ...");
     let bot_token = std::env::var("TELOXIDE_TOKEN")?;
@@ -83,66 +85,64 @@ async fn dispatcher(bot: &'static Bot, db: &'static Surreal<Db>) {
 
 async fn handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
     let command_handler = teloxide::filter_command::<Command, _>()
-//        .branch(case![Command::Start].endpoint(start))
-//        .branch(case![Command::Help].endpoint(help))
-        .branch(case![Command::Mp3(url)].endpoint(mp3));
-/*         .branch(case![Command::Mp4(url)].endpoint(mp4))
-        .branch(case![Command::Voice(url)].endpoint(voice))*/
- //       .branch(case![Command::C].endpoint(clear));
+        .branch(case![Command::Start].endpoint(start))
+        .branch(case![Command::Help].endpoint(help))
+        .branch(case![Command::Mp3(url)].endpoint(mp3))
+        .branch(case![Command::Mp4(url)].endpoint(mp4))
+        .branch(case![Command::Voice(url)].endpoint(voice))
+        .branch(case![Command::C].endpoint(clear));
 
     let message_handler = Update::filter_message().branch(command_handler);
 
     return message_handler;
 }
 
-/*async fn start(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
-    let chat_id = msg_from_user.chat.id;
-    let msg_id = msg_from_user.id;
-    let username = getuser(&msg_from_user);
+async fn start(bot: &'static Bot, msg_from_user: Message, db: &'static Surreal<Db>) -> HandlerResult {
+    let telepirate_request = TelepirateRequest::from(msg_from_user, None, bot, db);
+    let username = telepirate_request.username();
     let command_descriptions = Command::descriptions().to_string();
     info!("User @{} has /start'ed the bot.", username);
-    send_and_remember_msg(&bot, chat_id, &db, &command_descriptions).await;
-    database::intodb(chat_id, msg_id, &db).await?;
+    telepirate_request.send_and_remember_msg(&command_descriptions).await;
+    database::intodb(&telepirate_request).await?;
     Ok(())
 }
 
-async fn help(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
-    let chat_id = msg_from_user.chat.id;
-    let msg_id = msg_from_user.id;
-    let username = getuser(&msg_from_user);
+async fn help(bot: &'static Bot, msg_from_user: Message, db: &'static Surreal<Db>) -> HandlerResult {
+    let telepirate_request = TelepirateRequest::from(msg_from_user, None, bot, db);
+    let username = telepirate_request.username();
     let command_descriptions = Command::descriptions().to_string();
     info!("User @{} asked for /help.", username);
-    send_and_remember_msg(&bot, chat_id, &db, &command_descriptions).await;
-    database::intodb(chat_id, msg_id, &db).await?;
+    telepirate_request.send_and_remember_msg(&command_descriptions).await;
+    database::intodb(&telepirate_request).await?;
     Ok(())
-}*/
+}
 
 async fn mp3(url: String, bot: &'static Bot, msg_from_user: Message, db: &'static Surreal<Db>) -> HandlerResult {
-    let telepirate_request = TelepirateRequest::from(msg_from_user, FileType::Mp3, url, bot, db);
-    process_request(telepirate_request).await?;
+    let telepirate_request = TelepirateRequest::from(msg_from_user, Some(FileType::Mp3), bot, db);
+    telepirate_request.process_request(url).await?;
     Ok(())
 }
 
-/*async fn mp4(url: String, bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
-    let filetype = FileType::Mp4;
-    process_request(url, filetype, &bot, msg_from_user, &db).await?;
+async fn mp4(url: String, bot: &'static Bot, msg_from_user: Message, db: &'static Surreal<Db>) -> HandlerResult {
+    let telepirate_request = TelepirateRequest::from(msg_from_user, Some(FileType::Mp4), bot, db);
+    telepirate_request.process_request(url).await?;
     Ok(())
 }
 
-async fn voice(url: String, bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
-    let filetype = FileType::Voice;
-    process_request(url, filetype, &bot, msg_from_user, &db).await?;
+async fn voice(url: String, bot: &'static Bot, msg_from_user: Message, db: &'static Surreal<Db>) -> HandlerResult {
+    let telepirate_request = TelepirateRequest::from(msg_from_user, Some(FileType::Voice), bot, db);
+    telepirate_request.process_request(url).await?;
     Ok(())
 }
 
-async fn clear(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
-    let chat_id = msg_from_user.chat.id;
-    let msg_id = msg_from_user.id;
-    database::intodb(chat_id, msg_id, &db).await?;
+async fn clear(bot: &'static Bot, msg_from_user: Message, db: &'static Surreal<Db>) -> HandlerResult {
+    let telepirate_request = TelepirateRequest::from(msg_from_user, None, bot, db);
+    let chat_id = telepirate_request.chat_id();
+    database::intodb(&telepirate_request).await?;
     purge_trash_messages(chat_id, &db, &bot).await?;
-    info!("User @{} has cleaned up the chat.", getuser(&msg_from_user));
+    info!("User @{} has cleaned up the chat.", telepirate_request.username());
     Ok(())
-}*/
+}
 
 async fn purge_trash_messages(
     chat_id: ChatId,
@@ -164,32 +164,23 @@ async fn purge_trash_messages(
 }
 
 #[derive(Debug, Clone)]
-struct TelepirateRequest {
+pub struct TelepirateRequest {
     msg_from_user: Message,
-    filetype: FileType,
-    url: String,
+    filetype: Option<FileType>,
     request_id: Uuid,
     bot: &'static Bot,
     db: &'static Surreal<Db>,
 }
 
 impl TelepirateRequest {
-    pub fn from(msg_from_user: Message, filetype: FileType, url: String, bot: &'static Bot, db: &'static Surreal<Db>) -> Self {
+    pub fn from(msg_from_user: Message, filetype: Option<FileType>, bot: &'static Bot, db: &'static Surreal<Db>) -> Self {
         let telepirate_request = TelepirateRequest {
             msg_from_user,
-            filetype: filetype.clone(),
-            url,
+            filetype,
             request_id: Uuid::new_v4(),
             bot,
             db
         };
-        info!(
-            "User @{} asked for /{}. Request ID {}, Chat ID {}.",
-            &telepirate_request.username(),
-            filetype.as_str(),
-            telepirate_request.request_id.to_string(),
-            telepirate_request.chat_id()
-        );
         return telepirate_request;
     }
     fn username(&self) -> String {
@@ -209,154 +200,159 @@ impl TelepirateRequest {
         }
         return username;
     }
-    fn chat_id(&self) -> ChatId {
+    pub fn chat_id(&self) -> ChatId {
         self.msg_from_user.chat.id
     }
-    fn msg_id(&self) -> MessageId {
+    pub fn msg_id(&self) -> MessageId {
         self.msg_from_user.id
     }
-    fn url(&self) -> String {
-        self.url.clone()
-    }
-    fn db(&self) -> &'static Surreal<Db> {
+    pub fn db(&self) -> &'static Surreal<Db> {
         self.db
     }
-    fn filetype(&self) -> FileType {
+    fn filetype(&self) -> Option<FileType> {
         self.filetype.clone()
     }
     fn bot(&self) -> &'static Bot {
         self.bot
     }
-}
-
-use tokio::sync::watch;
-async fn process_request(telepirate_request: TelepirateRequest) -> HandlerResult {
-    debug!("Processing request ...");
-    let chat_id = telepirate_request.chat_id();
-    let msg_id = telepirate_request.msg_id();
-    let username = telepirate_request.username();
-    let url = telepirate_request.url();
-    let db = telepirate_request.db();
-    let filetype = telepirate_request.filetype();
-    let bot = telepirate_request.bot();
-    database::intodb(chat_id, msg_id, &db).await?;
-    if url_is_valid(&url) {
-        send_and_remember_msg(bot, chat_id, db, "Downloading... Please wait.").await;
-        let last_message_id = get_last_message_id(chat_id, db).await?;
-        // UUID is used because thats my choice.
-        let download_id = Uuid::new_v4();
-        // Channel is created because we need a way to exit a poller task after the request is done.
-        // This can be gracefully done only by sending a signal through the channel.
-        let (tx, rx) = watch::channel(false);
-        let poller_handle = run_directory_size_poller_and_mesage_updater(
-            rx,
-            chat_id,
-            last_message_id,
-            download_id,
-            bot.clone(),
-        )
-        .await;
-        let downloads_result = match &filetype {
-            FileType::Mp3 => task::spawn_blocking(move || pirate::mp3(url, &download_id)).await,
-            _ => panic!()
-            /*FileType::Mp4 => task::spawn_blocking(move || pirate::mp4(url, &download_id)).await,
-            FileType::Voice => task::spawn_blocking(move || pirate::ogg(url, &download_id)).await,*/
-        }?;
-        match downloads_result {
-            Err(error) => {
-                warn!("{}", error);
-                send_and_remember_msg(&bot, chat_id, &db, &error.to_string()).await;
-            }
-            Ok(files) => {
-                trace!(
-                    "All files are ready. Finishing poller task for Chat ID {} ...",
-                    chat_id
-                );
-                let _ = tx.send(true);
-                poller_handle.await?;
-                for path in files.paths.iter() {
-                    send_file(path, &username, &filetype, bot, chat_id, db).await;
-                }
-                purge_trash_messages(chat_id, db, &bot).await?;
-                cleanup(files.folder);
-            }
-        }
-    } else {
-        let ftype = filetype.as_str();
-        let correct_usage = match &filetype {
-//            FileType::Voice => {
-  //              format!("Correct usage:\n\n/voice https://valid_audio_url")
-    //        }
-            _ => {
-                format!("Correct usage:\n\n/{} https://valid_{}_url", ftype, ftype)
-            }
-        };
-        send_and_remember_msg(&bot, chat_id, db, &correct_usage).await;
-        info!("Reminded user @{} of a correct /{} usage.", username, ftype);
+    pub fn request_id(&self) -> String {
+        self.request_id.to_string()
     }
-    Ok(())
-}
-
-use std::path::PathBuf;
-async fn send_file(
-    path: &PathBuf,
-    username: &str,
-    filetype: &FileType,
-    bot: &Bot,
-    chat_id: ChatId,
-    db: &Surreal<Db>,
-) {
-    let file = InputFile::file(path);
-    let filename = path.file_name().unwrap().to_str().unwrap();
-    trace!("Sending '{}' to @{} ...", filename, &username);
-    let sending_result;
-    match filetype {
-        FileType::Mp3 => {
-            sending_result = bot.send_audio(chat_id, file).await;
-        }
- /*        FileType::Mp4 => {
-            sending_result = bot.send_video(chat_id, file).await;
-        }
-        FileType::Voice => {
-            sending_result = bot.send_voice(chat_id, file).await;
-        }*/
-    }
-    match sending_result {
-        Ok(_) => {
-            info!(
-                "File '{}' has been successfully delivered to @{}.",
-                filename, username
+    async fn send_and_remember_msg(&self, text: &str) {
+        let bot = self.bot();
+        let db = self.db();
+        let chat_id = self.chat_id();
+        let text_chunks = split_text(text);
+        let mut chunk_index: usize = 0;
+        trace!("Message chunks to send: {}.", text_chunks.len());
+        for chunk in text_chunks {
+            chunk_index += 1;
+            trace!(
+                "Sending text message {} of length {} ...",
+                chunk_index,
+                chunk.len()
             );
-            return;
-        }
-        Err(error) => {
-            let error_text = format!("File sending error: {}", error);
-            warn!("{}", error_text);
-            send_and_remember_msg(bot, chat_id, db, &error_text).await;
-        }
-    }
-}
-
-async fn send_and_remember_msg(bot: &Bot, chat_id: ChatId, db: &Surreal<Db>, text: &str) {
-    let text_chunks = split_text(text);
-    let mut chunk_index: usize = 0;
-    trace!("Message chunks to send: {}.", text_chunks.len());
-    for chunk in text_chunks {
-        chunk_index += 1;
-        trace!(
-            "Sending text message {} of length {} ...",
-            chunk_index,
-            chunk.len()
-        );
-        let message_result = bot.send_message(chat_id, chunk).await;
-        match message_result {
-            Ok(message) => {
-                if let Err(db_error) = database::intodb(chat_id, message.id, &db).await {
-                    warn!("Failed to record a message into DB: {}", db_error);
+            let message_result = bot.send_message(chat_id, chunk).await;
+            match message_result {
+                Ok(message) => {
+               if let Err(db_error) = database::intodb(self).await {
+                        warn!("Failed to record a message into DB: {}", db_error);
+                    }
+                }
+                Err(msg_error) => {
+                    warn!("Failed to send message: {}", msg_error);
                 }
             }
-            Err(msg_error) => {
-                warn!("Failed to send message: {}", msg_error);
+        }
+    }
+    async fn process_request(self, url: String) -> HandlerResult {
+        info!(
+                    "User @{} asked for /{}. Processing request ID {} from Chat ID {} ...",
+                    self.username(),
+                    self.filetype().unwrap().as_str(),
+                    self.request_id(),
+                    self.chat_id()
+        );
+        let request_id = self.request_id();
+        let chat_id = self.chat_id();
+        let msg_id = self.msg_id();
+        let username = self.username();
+        let db = self.db();
+        let filetype = self.filetype().unwrap();
+        let bot = self.bot();
+        database::intodb(&self).await?;
+        if url_is_valid(&url) {
+            self.send_and_remember_msg("Downloading... Please wait.").await;
+            let last_message_id = get_last_message_id(chat_id, db).await?;
+            // UUID is used because thats my choice.
+            let download_id = Uuid::new_v4();
+            // Channel is created because we need a way to exit a poller task after the request is done.
+            // This can be gracefully done only by sending a signal through the channel.
+            let (tx, rx) = watch::channel(false);
+            let poller_handle = run_directory_size_poller_and_mesage_updater(
+                rx,
+                chat_id,
+                last_message_id,
+                download_id,
+                bot.clone(),
+            )
+            .await;
+            let downloads_result = match &filetype {
+                FileType::Mp3 => task::spawn_blocking(move || pirate::mp3(url, &download_id)).await,
+                FileType::Mp4 => task::spawn_blocking(move || pirate::mp4(url, &download_id)).await,
+                FileType::Voice => task::spawn_blocking(move || pirate::ogg(url, &download_id)).await,
+            }?;
+            match downloads_result {
+                Err(error) => {
+                    warn!("{}", error);
+                    self.send_and_remember_msg(&error.to_string()).await;
+                }
+                Ok(files) => {
+                    trace!(
+                        "All files are ready. Finishing poller task for Chat ID {} ...",
+                        chat_id
+                    );
+                    let _ = tx.send(true);
+                    poller_handle.await?;
+                    for path in files.paths.iter() {
+                        self.send_file(path).await;
+                    }
+                    // TODO remove unwrap below
+                    dbg!(database::get_trash_messages_of_current_request_id(&self).await.unwrap());
+                    //purge_trash_messages(chat_id, db, &bot).await?;
+                    cleanup(files.folder);
+                }
+            }
+        } else {
+            let ftype = filetype.as_str();
+            let correct_usage = match &filetype {
+                FileType::Voice => {
+                    format!("Correct usage:\n\n/voice https://valid_audio_url")
+                }
+                _ => {
+                    format!("Correct usage:\n\n/{} https://valid_{}_url", ftype, ftype)
+                }
+            };
+            self.send_and_remember_msg(&correct_usage).await;
+            info!("Reminded user @{} of a correct /{} usage.", username, ftype);
+        }
+        Ok(())
+    }
+    async fn send_file(
+        &self,
+        path: &PathBuf,
+    ) {
+        let bot = self.bot();
+        let filetype = self.filetype().unwrap();
+        let username = self.username();
+        let chat_id = self.chat_id();
+        let file = InputFile::file(path);
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        trace!("Sending '{}' to @{} ...", filename, &username);
+        let sending_result;
+        match filetype {
+            FileType::Mp3 => {
+                sending_result = bot.send_audio(chat_id, file).await;
+            }
+            FileType::Mp4 => {
+                sending_result = bot.send_video(chat_id, file).await;
+            }
+            FileType::Voice => {
+                sending_result = bot.send_voice(chat_id, file).await;
+            }
+        }
+        match sending_result {
+            Ok(_) => {
+                info!(
+                    "File '{}' has been successfully delivered to @{}.",
+                    filename, username
+                );
+                return;
+            }
+            Err(error) => {
+                let error_text = format!("File sending error: {}", error);
+                warn!("{}", error_text);
+                self.send_and_remember_msg(&error_text).await;
             }
         }
     }
