@@ -23,7 +23,6 @@ pub enum FileType {
     Mp3,
     Mp4,
     Voice,
-    Gif,
 }
 
 impl FileType {
@@ -32,7 +31,6 @@ impl FileType {
             FileType::Mp3 => "mp3",
             FileType::Mp4 => "mp4",
             FileType::Voice => "opus",
-            FileType::Gif => "gif",
         };
     }
 }
@@ -86,23 +84,6 @@ pub fn ogg(url: String, download_id: &Uuid) -> DownloadsResult {
     Ok(downloaded)
 }
 
-pub fn gif(url: String, download_id: &Uuid) -> DownloadsResult {
-    let args = vec![
-        Arg::new_with_arg("--concurrent-fragments", "100000"),
-        Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
-        Arg::new_with_arg("--max-filesize", "50M"),
-        Arg::new_with_arg("--output", "%(title)s.mp4"),
-        Arg::new("--windows-filenames"),
-        Arg::new("--no-write-info-json"),
-        Arg::new("--no-embed-metadata"),
-        Arg::new_with_arg("--format-sort", "ext:mp4,codec:h264"),
-        Arg::new_with_arg("--format", "bv"),
-    ];
-    let filetype = FileType::Gif;
-    let downloaded = dl(url, args, filetype, download_id)?;
-    Ok(downloaded)
-}
-
 pub fn construct_destination_path(download_id: &Uuid) -> String {
     return format!("{}/{}", FILE_STORAGE, download_id);
 }
@@ -117,10 +98,7 @@ fn dl(url: String, args: Vec<Arg>, filetype: FileType, download_id: &Uuid) -> Do
     let mut paths: Vec<PathBuf> = Vec::new();
     let regex = Regex::new(r"(.*)(\.opus)").unwrap();
     let fileformat = filetype.as_str();
-    let filepaths = match filetype {
-        FileType::Gif => glob(&format!("{}/*mp4", absolute_destination_path))?,
-        _ => glob(&format!("{}/*{}", absolute_destination_path, fileformat))?,
-    };
+    let filepaths = glob(&format!("{}/*{}", absolute_destination_path, fileformat))?;
     for entry in filepaths {
         match entry {
             Ok(mut file_path) => {

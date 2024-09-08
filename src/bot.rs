@@ -1,7 +1,7 @@
 use crate::misc::{self, url_is_valid};
 use crate::{
     database::{self, forget_deleted_messages, get_last_message_id},
-    misc::{cleanup, sleep},
+    misc::{cleanup, sleep, split_text},
     pirate::{self, FileType},
 };
 use dptree::case;
@@ -35,8 +35,6 @@ enum Command {
     Mp4(String),
     #[command(description = "get audio as a voice message.")]
     Voice(String),
-    #[command(description = "get video as a animated GIF.")]
-    Gif(String),
     #[command(description = "delete trash messages.")]
     C,
 }
@@ -86,7 +84,6 @@ async fn handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 's
         .branch(case![Command::Mp3(url)].endpoint(mp3))
         .branch(case![Command::Mp4(url)].endpoint(mp4))
         .branch(case![Command::Voice(url)].endpoint(voice))
-        .branch(case![Command::Gif(url)].endpoint(gif))
         .branch(case![Command::C].endpoint(clear));
 
     let message_handler = Update::filter_message().branch(command_handler);
@@ -130,12 +127,6 @@ async fn mp4(url: String, bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> 
 
 async fn voice(url: String, bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
     let filetype = FileType::Voice;
-    process_request(url, filetype, &bot, msg_from_user, &db).await?;
-    Ok(())
-}
-
-async fn gif(url: String, bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
-    let filetype = FileType::Gif;
     process_request(url, filetype, &bot, msg_from_user, &db).await?;
     Ok(())
 }
@@ -219,7 +210,6 @@ async fn process_request(
             FileType::Mp3 => task::spawn_blocking(move || pirate::mp3(url, &download_id)).await,
             FileType::Mp4 => task::spawn_blocking(move || pirate::mp4(url, &download_id)).await,
             FileType::Voice => task::spawn_blocking(move || pirate::ogg(url, &download_id)).await,
-            FileType::Gif => task::spawn_blocking(move || pirate::gif(url, &download_id)).await,
         }?;
         match downloads_result {
             Err(error) => {
@@ -227,7 +217,10 @@ async fn process_request(
                 send_and_remember_msg(&bot, chat_id, &db, &error.to_string()).await;
             }
             Ok(files) => {
-                trace!("All files are ready. Finishing poller task for Chat ID {} ...", chat_id);
+                trace!(
+                    "All files are ready. Finishing poller task for Chat ID {} ...",
+                    chat_id
+                );
                 let _ = tx.send(true);
                 poller_handle.await?;
                 for path in files.paths.iter() {
@@ -242,9 +235,6 @@ async fn process_request(
         let correct_usage = match &filetype {
             FileType::Voice => {
                 format!("Correct usage:\n\n/voice https://valid_audio_url")
-            }
-            FileType::Gif => {
-                format!("Correct usage:\n\n/{} https://valid_video_url", ftype)
             }
             _ => {
                 format!("Correct usage:\n\n/{} https://valid_{}_url", ftype, ftype)
@@ -278,9 +268,6 @@ async fn send_file(
         }
         FileType::Voice => {
             sending_result = bot.send_voice(chat_id, file).await;
-        }
-        FileType::Gif => {
-            sending_result = bot.send_animation(chat_id, file).await;
         }
     }
     match sending_result {
@@ -324,22 +311,6 @@ async fn send_and_remember_msg(bot: &Bot, chat_id: ChatId, db: &Surreal<Db>, tex
     }
 }
 
-// Telegram limits message length to 4096 chars. Thus the message is split into sendable chunks.
-fn split_text(text: &str) -> Vec<String> {
-    trace!("Splitting text into sendable chunks ...");
-    if text.len() > 4096 {
-        let stringvec = text
-            .as_bytes()
-            .chunks(4096)
-            .map(|chunk| String::from_utf8_lossy(chunk).to_string())
-            .collect::<Vec<String>>();
-        return stringvec;
-    } else {
-        let stringvec = vec![text.to_string()];
-        return stringvec;
-    }
-}
-
 async fn run_directory_size_poller_and_mesage_updater(
     mut rx: watch::Receiver<bool>,
     chat_id: ChatId,
@@ -347,7 +318,10 @@ async fn run_directory_size_poller_and_mesage_updater(
     download_id: Uuid,
     bot: Bot,
 ) -> tokio::task::JoinHandle<()> {
-    debug!("Starting poller task for Chat ID {}, Download ID {} ...", chat_id, &download_id);
+    debug!(
+        "Starting poller task for Chat ID {}, Download ID {} ...",
+        chat_id, &download_id
+    );
     let poller_handle = tokio::task::spawn({
         async move {
             let path_to_downloads = pirate::construct_destination_path(&download_id);

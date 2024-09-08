@@ -71,3 +71,19 @@ pub fn get_directory_size(path_to_directory: &str) -> Result<u64, Box<dyn Error>
     }
     Ok(total_size)
 }
+
+// Telegram limits message length to 4096 chars. Thus the message is split into sendable chunks.
+pub fn split_text(text: &str) -> Vec<String> {
+    trace!("Splitting text into sendable chunks ...");
+    if text.len() > 4096 {
+        let stringvec = text
+            .as_bytes()
+            .chunks(4096)
+            .map(|chunk| String::from_utf8_lossy(chunk).to_string())
+            .collect::<Vec<String>>();
+        return stringvec;
+    } else {
+        let stringvec = vec![text.to_string()];
+        return stringvec;
+    }
+}
