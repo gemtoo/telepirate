@@ -6,6 +6,7 @@ use crate::{
 };
 use dptree::case;
 use reqwest::Client;
+use surrealdb::sql::Field;
 use std::error::Error;
 use std::time::Duration;
 use surrealdb::engine::local::Db;
@@ -39,14 +40,15 @@ enum Command {
     C,
 }
 
-async fn bot_init() -> Result<Bot, Box<dyn Error>> {
+async fn bot_init() -> Result<&'static Bot, Box<dyn Error>> {
     debug!("Initializing the bot ...");
     let bot_token = std::env::var("TELOXIDE_TOKEN")?;
     let client = Client::builder()
         .timeout(Duration::from_secs(360))
         .build()?;
     let bot = Bot::with_client(bot_token, client).set_api_url("http://telegram-api:8081".parse()?);
-    Ok(bot)
+    let boxed_bot = Box::new(bot);
+    Ok(Box::leak(boxed_bot))
 }
 
 pub async fn run() {
@@ -66,7 +68,7 @@ pub async fn run() {
     }
 }
 
-async fn dispatcher(bot: Bot, db: Surreal<Db>) {
+async fn dispatcher(bot: &'static Bot, db: &'static Surreal<Db>) {
     Dispatcher::builder(bot, handler().await)
         .dependencies(dptree::deps![db])
         .default_handler(|upd| async move {
@@ -81,19 +83,19 @@ async fn dispatcher(bot: Bot, db: Surreal<Db>) {
 
 async fn handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
     let command_handler = teloxide::filter_command::<Command, _>()
-        .branch(case![Command::Start].endpoint(start))
-        .branch(case![Command::Help].endpoint(help))
-        .branch(case![Command::Mp3(url)].endpoint(mp3))
-        .branch(case![Command::Mp4(url)].endpoint(mp4))
-        .branch(case![Command::Voice(url)].endpoint(voice))
-        .branch(case![Command::C].endpoint(clear));
+//        .branch(case![Command::Start].endpoint(start))
+//        .branch(case![Command::Help].endpoint(help))
+        .branch(case![Command::Mp3(url)].endpoint(mp3));
+/*         .branch(case![Command::Mp4(url)].endpoint(mp4))
+        .branch(case![Command::Voice(url)].endpoint(voice))*/
+ //       .branch(case![Command::C].endpoint(clear));
 
     let message_handler = Update::filter_message().branch(command_handler);
 
     return message_handler;
 }
 
-async fn start(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
+/*async fn start(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
     let chat_id = msg_from_user.chat.id;
     let msg_id = msg_from_user.id;
     let username = getuser(&msg_from_user);
@@ -113,15 +115,15 @@ async fn help(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResul
     send_and_remember_msg(&bot, chat_id, &db, &command_descriptions).await;
     database::intodb(chat_id, msg_id, &db).await?;
     Ok(())
-}
+}*/
 
-async fn mp3(url: String, bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
-    let filetype = FileType::Mp3;
-    process_request(url, filetype, &bot, msg_from_user, &db).await?;
+async fn mp3(url: String, bot: &'static Bot, msg_from_user: Message, db: &'static Surreal<Db>) -> HandlerResult {
+    let telepirate_request = TelepirateRequest::from(msg_from_user, FileType::Mp3, url, bot, db);
+    process_request(telepirate_request).await?;
     Ok(())
 }
 
-async fn mp4(url: String, bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
+/*async fn mp4(url: String, bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
     let filetype = FileType::Mp4;
     process_request(url, filetype, &bot, msg_from_user, &db).await?;
     Ok(())
@@ -140,24 +142,7 @@ async fn clear(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResu
     purge_trash_messages(chat_id, &db, &bot).await?;
     info!("User @{} has cleaned up the chat.", getuser(&msg_from_user));
     Ok(())
-}
-
-fn getuser(msg_from_user: &Message) -> String {
-    let chatkind = &msg_from_user.chat.kind;
-    let mut username: String = String::new();
-    match chatkind {
-        ChatKind::Private(chat) => {
-            match &chat.username {
-                None => username = "noname".to_string(),
-                Some(name) => {
-                    username = name.clone();
-                }
-            };
-        }
-        _ => {}
-    }
-    return username;
-}
+}*/
 
 async fn purge_trash_messages(
     chat_id: ChatId,
@@ -178,22 +163,85 @@ async fn purge_trash_messages(
     Ok(())
 }
 
-use tokio::sync::watch;
-async fn process_request(
-    url: String,
-    filetype: FileType,
-    bot: &Bot,
+#[derive(Debug, Clone)]
+struct TelepirateRequest {
     msg_from_user: Message,
-    db: &Surreal<Db>,
-) -> HandlerResult {
+    filetype: FileType,
+    url: String,
+    request_id: Uuid,
+    bot: &'static Bot,
+    db: &'static Surreal<Db>,
+}
+
+impl TelepirateRequest {
+    pub fn from(msg_from_user: Message, filetype: FileType, url: String, bot: &'static Bot, db: &'static Surreal<Db>) -> Self {
+        let telepirate_request = TelepirateRequest {
+            msg_from_user,
+            filetype: filetype.clone(),
+            url,
+            request_id: Uuid::new_v4(),
+            bot,
+            db
+        };
+        info!(
+            "User @{} asked for /{}. Request ID {}, Chat ID {}.",
+            &telepirate_request.username(),
+            filetype.as_str(),
+            telepirate_request.request_id.to_string(),
+            telepirate_request.chat_id()
+        );
+        return telepirate_request;
+    }
+    fn username(&self) -> String {
+        let msg_from_user = &self.msg_from_user;
+        let chatkind = &msg_from_user.chat.kind;
+        let mut username: String = String::new();
+        match chatkind {
+            ChatKind::Private(chat) => {
+                match &chat.username {
+                    None => username = "noname".to_string(),
+                    Some(name) => {
+                        username = name.clone();
+                    }
+                };
+            }
+            _ => {}
+        }
+        return username;
+    }
+    fn chat_id(&self) -> ChatId {
+        self.msg_from_user.chat.id
+    }
+    fn msg_id(&self) -> MessageId {
+        self.msg_from_user.id
+    }
+    fn url(&self) -> String {
+        self.url.clone()
+    }
+    fn db(&self) -> &'static Surreal<Db> {
+        self.db
+    }
+    fn filetype(&self) -> FileType {
+        self.filetype.clone()
+    }
+    fn bot(&self) -> &'static Bot {
+        self.bot
+    }
+}
+
+use tokio::sync::watch;
+async fn process_request(telepirate_request: TelepirateRequest) -> HandlerResult {
     debug!("Processing request ...");
-    let chat_id = msg_from_user.chat.id;
-    let msg_id = msg_from_user.id;
-    let username = getuser(&msg_from_user);
-    info!("User @{} asked for /{}.", &username, filetype.as_str());
+    let chat_id = telepirate_request.chat_id();
+    let msg_id = telepirate_request.msg_id();
+    let username = telepirate_request.username();
+    let url = telepirate_request.url();
+    let db = telepirate_request.db();
+    let filetype = telepirate_request.filetype();
+    let bot = telepirate_request.bot();
     database::intodb(chat_id, msg_id, &db).await?;
     if url_is_valid(&url) {
-        send_and_remember_msg(&bot, chat_id, db, "Downloading... Please wait.").await;
+        send_and_remember_msg(bot, chat_id, db, "Downloading... Please wait.").await;
         let last_message_id = get_last_message_id(chat_id, db).await?;
         // UUID is used because thats my choice.
         let download_id = Uuid::new_v4();
@@ -210,8 +258,9 @@ async fn process_request(
         .await;
         let downloads_result = match &filetype {
             FileType::Mp3 => task::spawn_blocking(move || pirate::mp3(url, &download_id)).await,
-            FileType::Mp4 => task::spawn_blocking(move || pirate::mp4(url, &download_id)).await,
-            FileType::Voice => task::spawn_blocking(move || pirate::ogg(url, &download_id)).await,
+            _ => panic!()
+            /*FileType::Mp4 => task::spawn_blocking(move || pirate::mp4(url, &download_id)).await,
+            FileType::Voice => task::spawn_blocking(move || pirate::ogg(url, &download_id)).await,*/
         }?;
         match downloads_result {
             Err(error) => {
@@ -235,9 +284,9 @@ async fn process_request(
     } else {
         let ftype = filetype.as_str();
         let correct_usage = match &filetype {
-            FileType::Voice => {
-                format!("Correct usage:\n\n/voice https://valid_audio_url")
-            }
+//            FileType::Voice => {
+  //              format!("Correct usage:\n\n/voice https://valid_audio_url")
+    //        }
             _ => {
                 format!("Correct usage:\n\n/{} https://valid_{}_url", ftype, ftype)
             }
@@ -265,12 +314,12 @@ async fn send_file(
         FileType::Mp3 => {
             sending_result = bot.send_audio(chat_id, file).await;
         }
-        FileType::Mp4 => {
+ /*        FileType::Mp4 => {
             sending_result = bot.send_video(chat_id, file).await;
         }
         FileType::Voice => {
             sending_result = bot.send_voice(chat_id, file).await;
-        }
+        }*/
     }
     match sending_result {
         Ok(_) => {

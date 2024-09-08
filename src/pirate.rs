@@ -21,16 +21,16 @@ pub struct Downloads {
 pub enum FileType {
     #[default]
     Mp3,
-    Mp4,
-    Voice,
+//    Mp4,
+//    Voice,
 }
 
 impl FileType {
     pub fn as_str<'a>(&self) -> &'a str {
         return match self {
             FileType::Mp3 => "mp3",
-            FileType::Mp4 => "mp4",
-            FileType::Voice => "opus",
+ //           FileType::Mp4 => "mp4",
+   //         FileType::Voice => "opus",
         };
     }
 }
@@ -52,7 +52,7 @@ pub fn mp3(url: String, download_id: &Uuid) -> DownloadsResult {
     Ok(downloaded)
 }
 
-pub fn mp4(url: String, download_id: &Uuid) -> DownloadsResult {
+/*pub fn mp4(url: String, download_id: &Uuid) -> DownloadsResult {
     let args = vec![
         Arg::new_with_arg("--concurrent-fragments", "100000"),
         Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
@@ -82,7 +82,7 @@ pub fn ogg(url: String, download_id: &Uuid) -> DownloadsResult {
     let filetype = FileType::Voice;
     let downloaded = dl(url, args, filetype, download_id)?;
     Ok(downloaded)
-}
+}*/
 
 pub fn construct_destination_path(download_id: &Uuid) -> String {
     return format!("{}/{}", FILE_STORAGE, download_id);
