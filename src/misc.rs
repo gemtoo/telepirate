@@ -69,11 +69,7 @@ pub struct FolderData {
 impl FolderData {
     // This function counts files and their respective size.
     pub fn from(path_to_directory: &str, extension: FileType) -> Self {
-        // Since we process yet unrenamed files, .ogg's need to be counted, not .opus
-        let extension_str = match extension {
-            FileType::Voice => "ogg",
-            _ => extension.as_str(),
-        };
+        let extension_str = extension.as_str();
         // Collect all files of a certain extension.
         let files: Vec<DirEntry> = WalkDir::new(path_to_directory)
             .into_iter()
