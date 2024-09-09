@@ -1,7 +1,6 @@
-use crate::misc::{self, url_is_valid};
 use crate::{
     database::{self, forget_deleted_messages, get_last_message_id},
-    misc::{cleanup, count_files_of_a_certain_extension, sleep, split_text},
+    misc::{cleanup, sleep, split_text, url_is_valid, FolderData},
     pirate::{self, FileType},
 };
 use dptree::case;
@@ -339,18 +338,15 @@ async fn run_directory_size_poller_and_mesage_updater(
                     _ = async {
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                     trace!("Polling data about Download ID {} ...", download_id);
-                    // Unwrap because this directory should already exist. Triggering previous unwrap woudn't get us here.
-                    let current_directory_size_bytes = misc::get_directory_size(&path_to_downloads).unwrap();
-                    let current_directory_size_megabytes_formatted = format!(
-                        "{:.2} MB",
-                        current_directory_size_bytes as f64 / (1024.0 * 1024.0)
+                    let folder_data = FolderData::from(&path_to_downloads, filetype.clone());
+                    trace!(
+                        "Download ID {}. File count: {}. Current size: {}.",
+                        &download_id, folder_data.file_count, folder_data.format_bytes_to_megabytes()
                     );
-                    let count_of_files_downloaded = count_files_of_a_certain_extension(&path_to_downloads, filetype.clone());
-                    trace!("Download ID {}. Current size: {}.", &download_id, &current_directory_size_megabytes_formatted);
                     let update_text = format!(
-                        "Downloading... Please wait.\nFiles in folder: {}.\nTotal size of downloads: {}.",
-                        count_of_files_downloaded,
-                        &current_directory_size_megabytes_formatted,
+                        "Downloading... Please wait.\nFiles downloaded: {}.\nTotal size of files: {}.",
+                        folder_data.file_count,
+                        folder_data.format_bytes_to_megabytes(),
                     );
                     // Telegram doesn't allow updating a message if content hasn't changed.
                     if update_text != previous_update_text {

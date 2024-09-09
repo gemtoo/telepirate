@@ -1,4 +1,4 @@
-use std::error::Error;
+use crate::pirate::FileType;
 use std::fs::remove_dir_all;
 use std::io::{stdout, Write};
 use std::path::PathBuf;
@@ -6,6 +6,8 @@ use std::thread;
 use std::time::Duration;
 use validators::prelude::*;
 use validators::url::Url;
+use walkdir::DirEntry;
+use walkdir::WalkDir;
 
 #[derive(Validator)]
 #[validator(http_url(local(Allow)))]
@@ -59,32 +61,43 @@ pub fn url_is_valid(url: &str) -> bool {
     return HttpURL::parse_string(url).is_ok();
 }
 
-use walkdir::WalkDir;
-pub fn get_directory_size(path_to_directory: &str) -> Result<u64, Box<dyn Error>> {
-    let mut total_size = 0;
-
-    for entry in WalkDir::new(path_to_directory) {
-        let entry = entry?;
-        if entry.file_type().is_file() {
-            total_size += std::fs::metadata(entry.path())?.len();
-        }
-    }
-    Ok(total_size)
+pub struct FolderData {
+    pub size_in_bytes: usize,
+    pub file_count: usize,
 }
 
-use crate::pirate::FileType;
-pub fn count_files_of_a_certain_extension(path_to_directory: &str, extension: FileType) -> usize {
-    let extension_str = match extension {
-        FileType::Voice => "ogg",
-        _ => extension.as_str(),
-    };
-    let count = WalkDir::new(path_to_directory)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.path().is_file())
-        .filter(|entry| entry.path().extension() == Some(std::ffi::OsStr::new(extension_str)))
-        .count();
-    return count;
+impl FolderData {
+    // This function counts files and their respective size.
+    pub fn from(path_to_directory: &str, extension: FileType) -> Self {
+        // Since we process yet unrenamed files, .ogg's need to be counted, not .opus
+        let extension_str = match extension {
+            FileType::Voice => "ogg",
+            _ => extension.as_str(),
+        };
+        // Collect all files of a certain extension.
+        let files: Vec<DirEntry> = WalkDir::new(path_to_directory)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().is_file())
+            .filter(|entry| entry.path().extension() == Some(std::ffi::OsStr::new(extension_str)))
+            .collect();
+        let file_count = files.len();
+        let mut size_in_bytes = 0;
+
+        for entry in files {
+            if entry.file_type().is_file() {
+                // This unwrap is ok as long as we run as root in Docker.
+                size_in_bytes += std::fs::metadata(entry.path()).unwrap().len() as usize;
+            }
+        }
+        FolderData {
+            size_in_bytes,
+            file_count,
+        }
+    }
+    pub fn format_bytes_to_megabytes(&self) -> String {
+        format!("{:.2} MB", self.size_in_bytes as f64 / (1024.0 * 1024.0))
+    }
 }
 
 // Telegram limits message length to 4096 chars. Thus the message is split into sendable chunks.
