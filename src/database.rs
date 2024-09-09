@@ -3,14 +3,15 @@ use std::error::Error;
 use surrealdb::{engine::local::Db, engine::local::Mem, Surreal};
 use teloxide::types::{ChatId, MessageId};
 
-pub async fn initialize() -> Surreal<Db> {
+pub async fn initialize() -> &'static Surreal<Db> {
     debug!("Initializing database ...");
     let db_result = Surreal::new::<Mem>(()).await;
     match db_result {
         Ok(db) => {
             info!("Database is ready.");
             db.use_ns(CRATE_NAME).use_db(CRATE_NAME).await.unwrap();
-            return db;
+            let boxed_db = Box::new(db);
+            return Box::leak(boxed_db);
         }
         Err(e) => {
             error!("Database error: {}", e);
