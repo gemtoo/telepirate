@@ -72,6 +72,21 @@ pub fn get_directory_size(path_to_directory: &str) -> Result<u64, Box<dyn Error>
     Ok(total_size)
 }
 
+use crate::pirate::FileType;
+pub fn count_files_of_a_certain_extension(path_to_directory: &str, extension: FileType) -> usize {
+    let extension_str = match extension {
+        FileType::Voice => "ogg",
+        _ => extension.as_str(),
+    };
+    let count = WalkDir::new(path_to_directory)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_file())
+        .filter(|entry| entry.path().extension() == Some(std::ffi::OsStr::new(extension_str)))
+        .count();
+    return count;
+}
+
 // Telegram limits message length to 4096 chars. Thus the message is split into sendable chunks.
 pub fn split_text(text: &str) -> Vec<String> {
     trace!("Splitting text into sendable chunks ...");

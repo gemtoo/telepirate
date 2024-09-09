@@ -1,0 +1,4 @@
+FROM surrealdb/surrealdb:v1.5.3
+
+ENTRYPOINT start --log info --user root --pass root file:/dbdata
+

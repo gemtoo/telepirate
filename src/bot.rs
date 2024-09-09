@@ -1,7 +1,7 @@
 use crate::misc::{self, url_is_valid};
 use crate::{
     database::{self, forget_deleted_messages, get_last_message_id},
-    misc::{cleanup, sleep, split_text},
+    misc::{cleanup, count_files_of_a_certain_extension, sleep, split_text},
     pirate::{self, FileType},
 };
 use dptree::case;
@@ -205,6 +205,7 @@ async fn process_request(
             chat_id,
             last_message_id,
             download_id,
+            filetype.clone(),
             bot.clone(),
         )
         .await;
@@ -318,6 +319,7 @@ async fn run_directory_size_poller_and_mesage_updater(
     chat_id: ChatId,
     last_message_id: MessageId,
     download_id: Uuid,
+    filetype: FileType,
     bot: Bot,
 ) -> tokio::task::JoinHandle<()> {
     debug!(
@@ -343,10 +345,12 @@ async fn run_directory_size_poller_and_mesage_updater(
                         "{:.2} MB",
                         current_directory_size_bytes as f64 / (1024.0 * 1024.0)
                     );
+                    let count_of_files_downloaded = count_files_of_a_certain_extension(&path_to_downloads, filetype.clone());
                     trace!("Download ID {}. Current size: {}.", &download_id, &current_directory_size_megabytes_formatted);
                     let update_text = format!(
-                        "Downloading ... Please wait.\nCurrent size of downloads folder: {}.",
-                        &current_directory_size_megabytes_formatted
+                        "Downloading... Please wait.\nFiles in folder: {}.\nTotal size of downloads: {}.",
+                        count_of_files_downloaded,
+                        &current_directory_size_megabytes_formatted,
                     );
                     // Telegram doesn't allow updating a message if content hasn't changed.
                     if update_text != previous_update_text {
