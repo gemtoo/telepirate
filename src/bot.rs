@@ -102,6 +102,7 @@ async fn start(
     Ok(())
 }
 
+#[derive(Clone)]
 struct TelepirateSession {
     bot: &'static Bot,
     db: &'static Surreal<DbClient>,
@@ -113,7 +114,7 @@ impl TelepirateSession {
             db,
         }
     }
-    async fn send_and_remember_msg(self, reference: TelepirateDbRecord, text: &str) {
+    async fn send_and_remember_msg(&self, reference: &TelepirateDbRecord, text: &str) {
         let text_chunks = split_text(text);
         let mut chunk_index: usize = 0;
         trace!("Message chunks to send: {}.", text_chunks.len());
@@ -138,7 +139,7 @@ impl TelepirateSession {
             }
         }
     }
-    async fn purge_all_trash_messages(self, reference: TelepirateDbRecord) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn purge_all_trash_messages(&self, reference: &TelepirateDbRecord) -> Result<(), Box<dyn Error + Send + Sync>> {
         let ids = reference.msg_ids_fromdb_by_chat_id(self.db).await?;
         for id in ids.into_iter() {
             trace!("Deleting Message ID {} from Chat {} ...", id.0, reference.chat_id);
@@ -151,6 +152,108 @@ impl TelepirateSession {
         }
         reference.fromdb_delete_all_by_chat_id(self.db).await.unwrap();
         Ok(())
+    }
+    async fn process_request(
+        self,
+        reference: TelepirateDbRecord,
+        url: String,
+        filetype: FileType,
+    ) -> HandlerResult {
+        debug!("Processing request ...");
+        let chat_id = reference.chat_id;
+        let username = &reference.username;
+        info!("User @{} asked for /{}.", &username, filetype.as_str());
+        reference.intodb(self.db).await;
+        if url_is_valid(&url) {
+            self.send_and_remember_msg(&reference, "Downloading... Please wait.").await;
+            let last_message_id = reference.msg_id_fromdb_last(self.db).await?.unwrap();
+            let download_id = reference.request_id.clone().to_string();
+            // Channel is created because we need a way to exit a poller task after the request is done.
+            // This can be gracefully done only by sending a signal through the channel.
+            let (tx, rx) = watch::channel(false);
+            let poller_handle = run_directory_size_poller_and_mesage_updater(
+                rx,
+                chat_id,
+                last_message_id,
+                download_id.clone(),
+                filetype.clone(),
+                self.bot.clone(),
+            )
+            .await;
+            let downloads_result = match &filetype {
+                FileType::Mp3 => task::spawn_blocking(move || pirate::mp3(url, download_id)).await,
+                FileType::Mp4 => task::spawn_blocking(move || pirate::mp4(url, download_id)).await,
+                FileType::Voice => task::spawn_blocking(move || pirate::ogg(url, download_id)).await,
+            }?;
+            match downloads_result {
+                Err(error) => {
+                    warn!("{}", error);
+                    self.send_and_remember_msg(&reference, &error.to_string()).await
+                }
+                Ok(files) => {
+                    trace!(
+                        "All files are ready. Finishing poller task for Chat ID {} ...",
+                        chat_id
+                    );
+                    let _ = tx.send(true);
+                    poller_handle.await?;
+                    for path in files.paths.iter() {
+                        self.clone().send_file(&reference, path, &filetype).await;
+                    }
+                    self.purge_all_trash_messages(&reference).await;
+                    cleanup(files.folder);
+                }
+            }
+        } else {
+            let ftype = filetype.as_str();
+            let correct_usage = match &filetype {
+                FileType::Voice => {
+                    format!("Correct usage:\n\n/voice https://valid_audio_url")
+                }
+                _ => {
+                    format!("Correct usage:\n\n/{} https://valid_{}_url", ftype, ftype)
+                }
+            };
+            self.send_and_remember_msg(&reference, &correct_usage).await;
+            info!("Reminded user @{} of a correct /{} usage.", username, ftype);
+        }
+        Ok(())
+    }
+    async fn send_file(
+        self,
+        reference: &TelepirateDbRecord,
+        path: &PathBuf,
+        filetype: &FileType,
+    ) {
+        let file = InputFile::file(path);
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        trace!("Sending '{}' to @{} ...", filename, reference.username);
+        let sending_result;
+        match filetype {
+            FileType::Mp3 => {
+                sending_result = self.bot.send_audio(reference.chat_id, file).await;
+            }
+            FileType::Mp4 => {
+                sending_result = self.bot.send_video(reference.chat_id, file).await;
+            }
+            FileType::Voice => {
+                sending_result = self.bot.send_voice(reference.chat_id, file).await;
+            }
+        }
+        match sending_result {
+            Ok(_) => {
+                info!(
+                    "File '{}' has been successfully delivered to @{}.",
+                    filename, reference.username
+                );
+                return;
+            }
+            Err(error) => {
+                let error_text = format!("File sending error: {}", error);
+                warn!("{}", error_text);
+                self.send_and_remember_msg(&reference, &error_text).await;
+            }
+        }
     }
 }
 
@@ -166,7 +269,7 @@ async fn help(
     dbrecord.intodb(db).await.unwrap();
     let command_descriptions = Command::descriptions().to_string();
     info!("User @{} asked for /help.", dbrecord.username);
-    telepirate_session.send_and_remember_msg(dbrecord, &command_descriptions).await;
+    telepirate_session.send_and_remember_msg(&dbrecord, &command_descriptions).await;
     Ok(())
 }
 
@@ -176,8 +279,12 @@ async fn mp3(
     msg_from_user: Message,
     db: &'static Surreal<DbClient>,
 ) -> HandlerResult {
+    let telepirate_session = TelepirateSession::from(bot, db);
+    let request_id = RequestId::new();
+    let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
     let filetype = FileType::Mp3;
-    process_request(url, filetype, bot, msg_from_user, db).await?;
+    telepirate_session.process_request(dbrecord, url, filetype).await.unwrap();
+    //process_request(url, filetype, bot, msg_from_user, db).await?;
     Ok(())
 }
 
@@ -212,7 +319,7 @@ async fn clear(
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user.clone(), request_id);
     dbrecord.intodb(db).await.unwrap();
-    telepirate_session.purge_all_trash_messages(dbrecord.clone()).await.unwrap();
+    telepirate_session.purge_all_trash_messages(&dbrecord).await.unwrap();
     info!("User @{} has cleaned up the chat.", dbrecord.username);
     Ok(())
 }
@@ -271,7 +378,7 @@ async fn process_request(
         send_and_remember_msg(bot, chat_id, db, "Downloading... Please wait.").await;
         let last_message_id = get_last_message_id(chat_id, db).await?;
         // UUID is used because thats my choice.
-        let download_id = Uuid::new_v4();
+        let download_id = "Uuid::new_v4()".to_string();
         // Channel is created because we need a way to exit a poller task after the request is done.
         // This can be gracefully done only by sending a signal through the channel.
         let (tx, rx) = watch::channel(false);
@@ -279,15 +386,15 @@ async fn process_request(
             rx,
             chat_id,
             last_message_id,
-            download_id,
+            download_id.clone(),
             filetype.clone(),
             bot.clone(),
         )
         .await;
         let downloads_result = match &filetype {
-            FileType::Mp3 => task::spawn_blocking(move || pirate::mp3(url, &download_id)).await,
-            FileType::Mp4 => task::spawn_blocking(move || pirate::mp4(url, &download_id)).await,
-            FileType::Voice => task::spawn_blocking(move || pirate::ogg(url, &download_id)).await,
+            FileType::Mp3 => task::spawn_blocking(move || pirate::mp3(url, download_id)).await,
+            FileType::Mp4 => task::spawn_blocking(move || pirate::mp4(url, download_id)).await,
+            FileType::Voice => task::spawn_blocking(move || pirate::ogg(url, download_id)).await,
         }?;
         match downloads_result {
             Err(error) => {
@@ -393,7 +500,7 @@ async fn run_directory_size_poller_and_mesage_updater(
     mut rx: watch::Receiver<bool>,
     chat_id: ChatId,
     last_message_id: MessageId,
-    download_id: Uuid,
+    download_id: String,
     filetype: FileType,
     bot: Bot,
 ) -> tokio::task::JoinHandle<()> {
@@ -403,7 +510,7 @@ async fn run_directory_size_poller_and_mesage_updater(
     );
     let poller_handle = tokio::task::spawn({
         async move {
-            let path_to_downloads = pirate::construct_destination_path(&download_id);
+            let path_to_downloads = pirate::construct_destination_path(download_id.clone());
             // As long as we run in Docker as root, there should be no issues with this unwrap.
             std::fs::create_dir_all(&path_to_downloads).unwrap();
             let mut previous_update_text: String = String::new();

@@ -35,7 +35,7 @@ impl FileType {
     }
 }
 
-pub fn mp3(url: String, download_id: &Uuid) -> DownloadsResult {
+pub fn mp3(url: String, download_id: String) -> DownloadsResult {
     let args = vec![
         Arg::new_with_arg("--concurrent-fragments", "100000"),
         Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
@@ -52,7 +52,7 @@ pub fn mp3(url: String, download_id: &Uuid) -> DownloadsResult {
     Ok(downloaded)
 }
 
-pub fn mp4(url: String, download_id: &Uuid) -> DownloadsResult {
+pub fn mp4(url: String, download_id: String) -> DownloadsResult {
     let args = vec![
         Arg::new_with_arg("--concurrent-fragments", "100000"),
         Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
@@ -68,7 +68,7 @@ pub fn mp4(url: String, download_id: &Uuid) -> DownloadsResult {
     Ok(downloaded)
 }
 
-pub fn ogg(url: String, download_id: &Uuid) -> DownloadsResult {
+pub fn ogg(url: String, download_id: String) -> DownloadsResult {
     let args = vec![
         Arg::new_with_arg("--concurrent-fragments", "100000"),
         Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
@@ -84,11 +84,11 @@ pub fn ogg(url: String, download_id: &Uuid) -> DownloadsResult {
     Ok(downloaded)
 }
 
-pub fn construct_destination_path(download_id: &Uuid) -> String {
+pub fn construct_destination_path(download_id: String) -> String {
     return format!("{}/{}", FILE_STORAGE, download_id);
 }
 
-fn dl(url: String, args: Vec<Arg>, filetype: FileType, download_id: &Uuid) -> DownloadsResult {
+fn dl(url: String, args: Vec<Arg>, filetype: FileType, download_id: String) -> DownloadsResult {
     debug!("Downloading {}(s) from {} ...", filetype.as_str(), url);
     // UUID is used to name path so that a second concurrent Tokio task can gather info from that path.
     let absolute_destination_path = &construct_destination_path(download_id);
