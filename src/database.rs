@@ -24,7 +24,7 @@ impl fmt::Display for RequestId {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelepirateDbRecord {
     pub chat_id: ChatId,
     pub message_id: MessageId,
