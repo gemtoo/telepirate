@@ -57,6 +57,11 @@ pub fn sleep(secs: u32) {
     thread::sleep(time);
 }
 
+pub fn die(reason: impl Into<String>) -> ! {
+    error!("{}", reason.into());
+    std::process::exit(1);
+}
+
 pub fn url_is_valid(url: &str) -> bool {
     return HttpURL::parse_string(url).is_ok();
 }

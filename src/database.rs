@@ -1,3 +1,4 @@
+use crate::misc::die;
 use crate::CRATE_NAME;
 use std::error::Error;
 use surrealdb::{
@@ -6,18 +7,18 @@ use surrealdb::{
 };
 use teloxide::types::{ChatId, MessageId};
 
-pub async fn initialize() -> Surreal<DbClient> {
+pub async fn initialize() -> &'static Surreal<DbClient> {
     debug!("Initializing database ...");
     let db_result = Surreal::new::<Ws>("surrealdb:8000").await;
     match db_result {
         Ok(db) => {
             info!("Database is ready.");
             db.use_ns(CRATE_NAME).use_db(CRATE_NAME).await.unwrap();
-            return db;
+            let boxed_db = Box::new(db);
+            return Box::leak(boxed_db);
         }
         Err(e) => {
-            error!("Database error: {}", e);
-            std::process::exit(1);
+            die(e.to_string());
         }
     }
 }

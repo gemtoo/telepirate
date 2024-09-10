@@ -1,16 +1,13 @@
 use crate::{
     database::{self, forget_deleted_messages, get_last_message_id},
-    misc::{cleanup, sleep, split_text, url_is_valid, FolderData},
+    misc::*,
     pirate::{self, FileType},
 };
 use dptree::case;
 use reqwest::Client as ReqwestClient;
 use std::error::Error;
 use std::time::Duration;
-use surrealdb::{
-    engine::remote::ws::Client as DbClient,
-    Surreal,
-};
+use surrealdb::{engine::remote::ws::Client as DbClient, Surreal};
 use teloxide::types::ChatKind;
 use teloxide::types::InputFile;
 use teloxide::types::MessageId;
@@ -40,34 +37,30 @@ enum Command {
     C,
 }
 
-async fn bot_init() -> Result<Bot, Box<dyn Error>> {
+fn bot_init() -> &'static Bot {
     debug!("Initializing the bot ...");
-    let bot_token = std::env::var("TELOXIDE_TOKEN")?;
+    let bot_token = match std::env::var("TELOXIDE_TOKEN") {
+        Ok(token) => token,
+        Err(e) => die(e.to_string()),
+    };
     let client = ReqwestClient::builder()
         .timeout(Duration::from_secs(360))
-        .build()?;
-    let bot = Bot::with_client(bot_token, client).set_api_url("http://telegram-api:8081".parse()?);
-    Ok(bot)
+        .build()
+        .unwrap_or_else(|error| die(error.to_string()));
+    let bot = Bot::with_client(bot_token, client)
+        .set_api_url("http://telegram-api:8081".parse().unwrap());
+    let boxed_bot = Box::new(bot);
+    info!("Connection has been established.");
+    return Box::leak(boxed_bot);
 }
 
 pub async fn run() {
-    loop {
-        match bot_init().await {
-            Ok(bot) => {
-                info!("Connection has been established.");
-                let db = database::initialize().await;
-                dispatcher(bot, db).await;
-            }
-            Err(reason) => {
-                error!("{}", reason);
-            }
-        }
-        warn!("Could not establish connection. Trying again after 30 seconds.");
-        sleep(30);
-    }
+    let bot = bot_init();
+    let db = database::initialize().await;
+    dispatcher(bot, db).await;
 }
 
-async fn dispatcher(bot: Bot, db: Surreal<DbClient>) {
+async fn dispatcher(bot: &'static Bot, db: &'static Surreal<DbClient>) {
     Dispatcher::builder(bot, handler().await)
         .dependencies(dptree::deps![db])
         .default_handler(|upd| async move {
@@ -94,51 +87,78 @@ async fn handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 's
     return message_handler;
 }
 
-async fn start(bot: Bot, msg_from_user: Message, db: Surreal<DbClient>) -> HandlerResult {
+async fn start(
+    bot: &'static Bot,
+    msg_from_user: Message,
+    db: &'static Surreal<DbClient>,
+) -> HandlerResult {
     let chat_id = msg_from_user.chat.id;
     let msg_id = msg_from_user.id;
     let username = getuser(&msg_from_user);
     let command_descriptions = Command::descriptions().to_string();
     info!("User @{} has /start'ed the bot.", username);
-    send_and_remember_msg(&bot, chat_id, &db, &command_descriptions).await;
-    database::intodb(chat_id, msg_id, &db).await?;
+    send_and_remember_msg(bot, chat_id, db, &command_descriptions).await;
+    database::intodb(chat_id, msg_id, db).await?;
     Ok(())
 }
 
-async fn help(bot: Bot, msg_from_user: Message, db: Surreal<DbClient>) -> HandlerResult {
+async fn help(
+    bot: &'static Bot,
+    msg_from_user: Message,
+    db: &'static Surreal<DbClient>,
+) -> HandlerResult {
     let chat_id = msg_from_user.chat.id;
     let msg_id = msg_from_user.id;
     let username = getuser(&msg_from_user);
     let command_descriptions = Command::descriptions().to_string();
     info!("User @{} asked for /help.", username);
-    send_and_remember_msg(&bot, chat_id, &db, &command_descriptions).await;
-    database::intodb(chat_id, msg_id, &db).await?;
+    send_and_remember_msg(bot, chat_id, db, &command_descriptions).await;
+    database::intodb(chat_id, msg_id, db).await?;
     Ok(())
 }
 
-async fn mp3(url: String, bot: Bot, msg_from_user: Message, db: Surreal<DbClient>) -> HandlerResult {
+async fn mp3(
+    url: String,
+    bot: &'static Bot,
+    msg_from_user: Message,
+    db: &'static Surreal<DbClient>,
+) -> HandlerResult {
     let filetype = FileType::Mp3;
-    process_request(url, filetype, &bot, msg_from_user, &db).await?;
+    process_request(url, filetype, bot, msg_from_user, db).await?;
     Ok(())
 }
 
-async fn mp4(url: String, bot: Bot, msg_from_user: Message, db: Surreal<DbClient>) -> HandlerResult {
+async fn mp4(
+    url: String,
+    bot: &'static Bot,
+    msg_from_user: Message,
+    db: &'static Surreal<DbClient>,
+) -> HandlerResult {
     let filetype = FileType::Mp4;
-    process_request(url, filetype, &bot, msg_from_user, &db).await?;
+    process_request(url, filetype, bot, msg_from_user, db).await?;
     Ok(())
 }
 
-async fn voice(url: String, bot: Bot, msg_from_user: Message, db: Surreal<DbClient>) -> HandlerResult {
+async fn voice(
+    url: String,
+    bot: &'static Bot,
+    msg_from_user: Message,
+    db: &'static Surreal<DbClient>,
+) -> HandlerResult {
     let filetype = FileType::Voice;
-    process_request(url, filetype, &bot, msg_from_user, &db).await?;
+    process_request(url, filetype, bot, msg_from_user, db).await?;
     Ok(())
 }
 
-async fn clear(bot: Bot, msg_from_user: Message, db: Surreal<DbClient>) -> HandlerResult {
+async fn clear(
+    bot: &'static Bot,
+    msg_from_user: Message,
+    db: &'static Surreal<DbClient>,
+) -> HandlerResult {
     let chat_id = msg_from_user.chat.id;
     let msg_id = msg_from_user.id;
-    database::intodb(chat_id, msg_id, &db).await?;
-    purge_trash_messages(chat_id, &db, &bot).await?;
+    database::intodb(chat_id, msg_id, db).await?;
+    purge_trash_messages(chat_id, db, bot).await?;
     info!("User @{} has cleaned up the chat.", getuser(&msg_from_user));
     Ok(())
 }
@@ -192,9 +212,9 @@ async fn process_request(
     let msg_id = msg_from_user.id;
     let username = getuser(&msg_from_user);
     info!("User @{} asked for /{}.", &username, filetype.as_str());
-    database::intodb(chat_id, msg_id, &db).await?;
+    database::intodb(chat_id, msg_id, db).await?;
     if url_is_valid(&url) {
-        send_and_remember_msg(&bot, chat_id, db, "Downloading... Please wait.").await;
+        send_and_remember_msg(bot, chat_id, db, "Downloading... Please wait.").await;
         let last_message_id = get_last_message_id(chat_id, db).await?;
         // UUID is used because thats my choice.
         let download_id = Uuid::new_v4();
@@ -218,7 +238,7 @@ async fn process_request(
         match downloads_result {
             Err(error) => {
                 warn!("{}", error);
-                send_and_remember_msg(&bot, chat_id, &db, &error.to_string()).await;
+                send_and_remember_msg(bot, chat_id, db, &error.to_string()).await;
             }
             Ok(files) => {
                 trace!(
@@ -230,7 +250,7 @@ async fn process_request(
                 for path in files.paths.iter() {
                     send_file(path, &username, &filetype, bot, chat_id, db).await;
                 }
-                purge_trash_messages(chat_id, db, &bot).await?;
+                purge_trash_messages(chat_id, db, bot).await?;
                 cleanup(files.folder);
             }
         }
@@ -244,7 +264,7 @@ async fn process_request(
                 format!("Correct usage:\n\n/{} https://valid_{}_url", ftype, ftype)
             }
         };
-        send_and_remember_msg(&bot, chat_id, db, &correct_usage).await;
+        send_and_remember_msg(bot, chat_id, db, &correct_usage).await;
         info!("Reminded user @{} of a correct /{} usage.", username, ftype);
     }
     Ok(())
@@ -304,7 +324,7 @@ async fn send_and_remember_msg(bot: &Bot, chat_id: ChatId, db: &Surreal<DbClient
         let message_result = bot.send_message(chat_id, chunk).await;
         match message_result {
             Ok(message) => {
-                if let Err(db_error) = database::intodb(chat_id, message.id, &db).await {
+                if let Err(db_error) = database::intodb(chat_id, message.id, db).await {
                     warn!("Failed to record a message into DB: {}", db_error);
                 }
             }
