@@ -153,6 +153,20 @@ impl TelepirateSession {
         reference.fromdb_delete_all_by_chat_id(self.db).await.unwrap();
         Ok(())
     }
+    async fn purge_request_id_trash_messages(&self, reference: &TelepirateDbRecord) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let ids = reference.msg_ids_fromdb_by_request_id(self.db).await?;
+        for id in ids.into_iter() {
+            trace!("Deleting Message ID {} from Chat {} ...", id.0, reference.chat_id);
+            match self.bot.delete_message(reference.chat_id, id).await {
+                Err(e) => {
+                    error!("Can't delete a message: {}", e);
+                }
+                _ => {}
+            }
+        }
+        reference.fromdb_delete_all_by_request_id(self.db).await.unwrap();
+        Ok(())
+    }
     async fn process_request(
         self,
         reference: TelepirateDbRecord,
@@ -200,7 +214,7 @@ impl TelepirateSession {
                     for path in files.paths.iter() {
                         self.clone().send_file(&reference, path, &filetype).await;
                     }
-                    self.purge_all_trash_messages(&reference).await;
+                    self.purge_request_id_trash_messages(&reference).await.unwrap();
                     cleanup(files.folder);
                 }
             }
@@ -284,7 +298,6 @@ async fn mp3(
     let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
     let filetype = FileType::Mp3;
     telepirate_session.process_request(dbrecord, url, filetype).await.unwrap();
-    //process_request(url, filetype, bot, msg_from_user, db).await?;
     Ok(())
 }
 

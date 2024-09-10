@@ -73,6 +73,13 @@ impl TelepirateDbRecord {
         let _ = query_response.take::<Vec<Self>>(0)?;
         Ok(())
     }
+    pub async fn fromdb_delete_all_by_request_id(&self, db: &Surreal<DbClient>) -> Result<(), Box<dyn Error + Send + Sync>> {
+        trace!("Deleting all records related to Request ID {} from the DB ...", self.request_id);
+        let sql = format!("DELETE {} WHERE request_id = s'{}';", CRATE_NAME, self.request_id);
+        let mut query_response = db.query(sql).await?;
+        let _ = query_response.take::<Vec<Self>>(0)?;
+        Ok(())
+    }
 }
 
 pub async fn initialize() -> &'static Surreal<DbClient> {
