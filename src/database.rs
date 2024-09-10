@@ -45,10 +45,19 @@ impl TelepirateDbRecord {
         let _: Vec<TelepirateDbRecord> = db.create(CRATE_NAME).content(self).await?;
         Ok(())
     }
-    pub async fn fromdb(&self, db: &Surreal<DbClient>) -> Vec<Self> {
-        trace!("Retrieving all messages with Request ID {} and Chat ID {} ...", self.request_id, self.chat_id);
-        vec![]
+    pub async fn msg_ids_fromdb_by_request_id(&self, db: &Surreal<DbClient>) -> Result<Vec<MessageId>, Box<dyn Error + Send + Sync>> {
+        trace!("Retrieving all messages with Request ID {} and Chat ID {} from DB ...", self.request_id, self.chat_id);
+        let sql = format!("SELECT VALUE message_id FROM {} WHERE request_id = s'{}';", CRATE_NAME, self.request_id);
+        let mut query_response = db.query(sql).await?;
+        let messages_with_request_id = query_response.take::<Vec<MessageId>>(0)?;
+        dbg!(&messages_with_request_id);
+        Ok(messages_with_request_id)
     }
+    //pub async fn fromdb_by_chat_id(&self, db: &Surreal<DbClient>) -> Vec<Self> {
+        // select value message_id from telepirate where chat_id = <number>;
+      //  vec![]
+    //}
+    //pub async fn fromdb_last() "math::max(select value message_id.message_id from telepirate where chat_id = <number>);" - returns i32
 }
 
 pub async fn initialize() -> &'static Surreal<DbClient> {
