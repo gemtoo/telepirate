@@ -114,6 +114,7 @@ async fn help(
     send_and_remember_msg(bot, dbrecord.chat_id, db, &command_descriptions).await;
     database::intodb(dbrecord.chat_id, dbrecord.message_id, db).await?;
     dbrecord.msg_ids_fromdb_by_request_id(db).await;
+    dbrecord.msg_ids_fromdb_by_chat_id(db).await;
     Ok(())
 }
 
