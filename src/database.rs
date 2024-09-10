@@ -1,11 +1,55 @@
 use crate::misc::die;
+use crate::bot::getuser;
 use crate::CRATE_NAME;
 use std::error::Error;
+use serde::{Deserialize, Serialize};
 use surrealdb::{
     engine::remote::ws::{Client as DbClient, Ws},
     Surreal,
 };
-use teloxide::types::{ChatId, MessageId};
+use teloxide::types::{ChatId, Message, MessageId};
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RequestId(Uuid);
+impl RequestId {
+    pub fn new() -> Self {
+        RequestId(Uuid::new_v4())
+    }
+}
+use std::fmt;
+impl fmt::Display for RequestId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0.to_string())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct TelepirateDbRecord {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+    pub username: String,
+    pub request_id: RequestId,
+}
+impl TelepirateDbRecord {
+    pub fn from(message: Message) -> Self {
+        TelepirateDbRecord {
+            chat_id: message.chat.id,
+            message_id: message.id,
+            username: getuser(&message),
+            request_id: RequestId::new(),
+        }
+    }
+    pub async fn intodb(&self, db: &Surreal<DbClient>) -> Result<(), Box<dyn Error + Send + Sync>> {
+        trace!("Recording Request ID {}, Message ID {}, Chat ID {} into DB ...", self.request_id, self.message_id, self.chat_id);
+        let _: Vec<MessageId> = db.create(CRATE_NAME).content(self).await?;
+        Ok(())
+    }
+    pub async fn fromdb(&self, db: &Surreal<DbClient>) -> Vec<Self> {
+        trace!("Retrieving all messages with Request ID {} and Chat ID {} ...", self.request_id, self.chat_id);
+        vec![]
+    }
+}
 
 pub async fn initialize() -> &'static Surreal<DbClient> {
     debug!("Initializing database ...");

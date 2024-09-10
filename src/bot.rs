@@ -1,5 +1,5 @@
 use crate::{
-    database::{self, forget_deleted_messages, get_last_message_id},
+    database::{self, forget_deleted_messages, get_last_message_id, TelepirateDbRecord},
     misc::*,
     pirate::{self, FileType},
 };
@@ -107,13 +107,12 @@ async fn help(
     msg_from_user: Message,
     db: &'static Surreal<DbClient>,
 ) -> HandlerResult {
-    let chat_id = msg_from_user.chat.id;
-    let msg_id = msg_from_user.id;
-    let username = getuser(&msg_from_user);
+    let dbrecord = TelepirateDbRecord::from(msg_from_user);
+    dbrecord.intodb(db);
     let command_descriptions = Command::descriptions().to_string();
-    info!("User @{} asked for /help.", username);
-    send_and_remember_msg(bot, chat_id, db, &command_descriptions).await;
-    database::intodb(chat_id, msg_id, db).await?;
+    info!("User @{} asked for /help.", dbrecord.username);
+    send_and_remember_msg(bot, dbrecord.chat_id, db, &command_descriptions).await;
+    database::intodb(dbrecord.chat_id, dbrecord.message_id, db).await?;
     Ok(())
 }
 
@@ -163,7 +162,7 @@ async fn clear(
     Ok(())
 }
 
-fn getuser(msg_from_user: &Message) -> String {
+pub fn getuser(msg_from_user: &Message) -> String {
     let chatkind = &msg_from_user.chat.kind;
     let mut username: String = String::new();
     match chatkind {
@@ -358,7 +357,7 @@ async fn run_directory_size_poller_and_mesage_updater(
                 tokio::select! {
                     // This case handles the main logic while rx is false.
                     _ = async {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    sleep(1).await;
                     trace!("Polling data about Download ID {} ...", download_id);
                     let folder_data = FolderData::from(&path_to_downloads, filetype.clone());
                     trace!(
