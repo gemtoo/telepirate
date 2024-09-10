@@ -42,7 +42,7 @@ impl TelepirateDbRecord {
     }
     pub async fn intodb(&self, db: &Surreal<DbClient>) -> Result<(), Box<dyn Error + Send + Sync>> {
         trace!("Recording Request ID {}, Message ID {}, Chat ID {} into DB ...", self.request_id, self.message_id, self.chat_id);
-        let _: Vec<MessageId> = db.create(CRATE_NAME).content(self).await?;
+        let _: Vec<TelepirateDbRecord> = db.create(CRATE_NAME).content(self).await?;
         Ok(())
     }
     pub async fn fromdb(&self, db: &Surreal<DbClient>) -> Vec<Self> {
