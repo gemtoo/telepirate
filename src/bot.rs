@@ -4,11 +4,13 @@ use crate::{
     pirate::{self, FileType},
 };
 use dptree::case;
-use reqwest::Client;
+use reqwest::Client as ReqwestClient;
 use std::error::Error;
 use std::time::Duration;
-use surrealdb::engine::local::Db;
-use surrealdb::Surreal;
+use surrealdb::{
+    engine::remote::ws::Client as DbClient,
+    Surreal,
+};
 use teloxide::types::ChatKind;
 use teloxide::types::InputFile;
 use teloxide::types::MessageId;
@@ -41,7 +43,7 @@ enum Command {
 async fn bot_init() -> Result<Bot, Box<dyn Error>> {
     debug!("Initializing the bot ...");
     let bot_token = std::env::var("TELOXIDE_TOKEN")?;
-    let client = Client::builder()
+    let client = ReqwestClient::builder()
         .timeout(Duration::from_secs(360))
         .build()?;
     let bot = Bot::with_client(bot_token, client).set_api_url("http://telegram-api:8081".parse()?);
@@ -65,7 +67,7 @@ pub async fn run() {
     }
 }
 
-async fn dispatcher(bot: Bot, db: Surreal<Db>) {
+async fn dispatcher(bot: Bot, db: Surreal<DbClient>) {
     Dispatcher::builder(bot, handler().await)
         .dependencies(dptree::deps![db])
         .default_handler(|upd| async move {
@@ -92,7 +94,7 @@ async fn handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 's
     return message_handler;
 }
 
-async fn start(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
+async fn start(bot: Bot, msg_from_user: Message, db: Surreal<DbClient>) -> HandlerResult {
     let chat_id = msg_from_user.chat.id;
     let msg_id = msg_from_user.id;
     let username = getuser(&msg_from_user);
@@ -103,7 +105,7 @@ async fn start(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResu
     Ok(())
 }
 
-async fn help(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
+async fn help(bot: Bot, msg_from_user: Message, db: Surreal<DbClient>) -> HandlerResult {
     let chat_id = msg_from_user.chat.id;
     let msg_id = msg_from_user.id;
     let username = getuser(&msg_from_user);
@@ -114,25 +116,25 @@ async fn help(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResul
     Ok(())
 }
 
-async fn mp3(url: String, bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
+async fn mp3(url: String, bot: Bot, msg_from_user: Message, db: Surreal<DbClient>) -> HandlerResult {
     let filetype = FileType::Mp3;
     process_request(url, filetype, &bot, msg_from_user, &db).await?;
     Ok(())
 }
 
-async fn mp4(url: String, bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
+async fn mp4(url: String, bot: Bot, msg_from_user: Message, db: Surreal<DbClient>) -> HandlerResult {
     let filetype = FileType::Mp4;
     process_request(url, filetype, &bot, msg_from_user, &db).await?;
     Ok(())
 }
 
-async fn voice(url: String, bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
+async fn voice(url: String, bot: Bot, msg_from_user: Message, db: Surreal<DbClient>) -> HandlerResult {
     let filetype = FileType::Voice;
     process_request(url, filetype, &bot, msg_from_user, &db).await?;
     Ok(())
 }
 
-async fn clear(bot: Bot, msg_from_user: Message, db: Surreal<Db>) -> HandlerResult {
+async fn clear(bot: Bot, msg_from_user: Message, db: Surreal<DbClient>) -> HandlerResult {
     let chat_id = msg_from_user.chat.id;
     let msg_id = msg_from_user.id;
     database::intodb(chat_id, msg_id, &db).await?;
@@ -160,7 +162,7 @@ fn getuser(msg_from_user: &Message) -> String {
 
 async fn purge_trash_messages(
     chat_id: ChatId,
-    db: &Surreal<Db>,
+    db: &Surreal<DbClient>,
     bot: &Bot,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let ids = database::get_trash_message_ids(chat_id, db).await?;
@@ -183,7 +185,7 @@ async fn process_request(
     filetype: FileType,
     bot: &Bot,
     msg_from_user: Message,
-    db: &Surreal<Db>,
+    db: &Surreal<DbClient>,
 ) -> HandlerResult {
     debug!("Processing request ...");
     let chat_id = msg_from_user.chat.id;
@@ -255,7 +257,7 @@ async fn send_file(
     filetype: &FileType,
     bot: &Bot,
     chat_id: ChatId,
-    db: &Surreal<Db>,
+    db: &Surreal<DbClient>,
 ) {
     let file = InputFile::file(path);
     let filename = path.file_name().unwrap().to_str().unwrap();
@@ -288,7 +290,7 @@ async fn send_file(
     }
 }
 
-async fn send_and_remember_msg(bot: &Bot, chat_id: ChatId, db: &Surreal<Db>, text: &str) {
+async fn send_and_remember_msg(bot: &Bot, chat_id: ChatId, db: &Surreal<DbClient>, text: &str) {
     let text_chunks = split_text(text);
     let mut chunk_index: usize = 0;
     trace!("Message chunks to send: {}.", text_chunks.len());

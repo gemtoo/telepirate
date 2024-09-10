@@ -10,6 +10,15 @@ services:
     restart: always
     stop_grace_period: 1s
 
+  surrealdb:
+    container_name: surrealdb
+    build:
+      dockerfile: Dockerfile-surrealdb
+    volumes:
+      - ./dbdata:/persistence
+    restart: always
+    stop_grace_period: 1s
+
   telegram-api:
     container_name: telegram-api
     build:

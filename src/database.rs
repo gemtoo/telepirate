@@ -1,11 +1,14 @@
 use crate::CRATE_NAME;
 use std::error::Error;
-use surrealdb::{engine::local::Db, engine::local::Mem, Surreal};
+use surrealdb::{
+    engine::remote::ws::{Client as DbClient, Ws},
+    Surreal,
+};
 use teloxide::types::{ChatId, MessageId};
 
-pub async fn initialize() -> Surreal<Db> {
+pub async fn initialize() -> Surreal<DbClient> {
     debug!("Initializing database ...");
-    let db_result = Surreal::new::<Mem>(()).await;
+    let db_result = Surreal::new::<Ws>("surrealdb:8000").await;
     match db_result {
         Ok(db) => {
             info!("Database is ready.");
@@ -22,7 +25,7 @@ pub async fn initialize() -> Surreal<Db> {
 pub async fn intodb(
     chat_id: ChatId,
     msg_id: MessageId,
-    db: &Surreal<Db>,
+    db: &Surreal<DbClient>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let database_name = generate_database_name_from_chat(chat_id);
     trace!(
@@ -36,7 +39,7 @@ pub async fn intodb(
 
 pub async fn get_trash_message_ids(
     chat_id: ChatId,
-    db: &Surreal<Db>,
+    db: &Surreal<DbClient>,
 ) -> Result<Vec<MessageId>, Box<dyn Error + Send + Sync>> {
     let database_name = generate_database_name_from_chat(chat_id);
     let message_ids: Vec<MessageId> = db.select(database_name).await?;
@@ -45,7 +48,7 @@ pub async fn get_trash_message_ids(
 
 pub async fn forget_deleted_messages(
     chat_id: ChatId,
-    db: &Surreal<Db>,
+    db: &Surreal<DbClient>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     trace!("Forgetting deleted messages for Chat ID {} ...", chat_id.0);
     let database_name = generate_database_name_from_chat(chat_id);
@@ -55,7 +58,7 @@ pub async fn forget_deleted_messages(
 
 pub async fn get_last_message_id(
     chat_id: ChatId,
-    db: &Surreal<Db>,
+    db: &Surreal<DbClient>,
 ) -> Result<MessageId, Box<dyn Error + Send + Sync>> {
     let database_name = generate_database_name_from_chat(chat_id);
     let sql = &format!("math::max(SELECT VALUE message_id FROM {});", database_name);
