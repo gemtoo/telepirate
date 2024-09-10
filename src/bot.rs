@@ -177,7 +177,7 @@ impl TelepirateSession {
         let chat_id = reference.chat_id;
         let username = &reference.username;
         info!("User @{} asked for /{}.", &username, filetype.as_str());
-        reference.intodb(self.db).await;
+        reference.intodb(self.db).await.unwrap();
         if url_is_valid(&url) {
             self.send_and_remember_msg(&reference, "Downloading... Please wait.").await;
             let last_message_id = reference.msg_id_fromdb_last(self.db).await?.unwrap();
@@ -297,7 +297,7 @@ async fn mp3(
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
     let filetype = FileType::Mp3;
-    telepirate_session.process_request(dbrecord, url, filetype).await.unwrap();
+    telepirate_session.process_request(dbrecord, url, filetype).await?;
     Ok(())
 }
 
@@ -307,8 +307,11 @@ async fn mp4(
     msg_from_user: Message,
     db: &'static Surreal<DbClient>,
 ) -> HandlerResult {
+    let telepirate_session = TelepirateSession::from(bot, db);
+    let request_id = RequestId::new();
+    let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
     let filetype = FileType::Mp4;
-    process_request(url, filetype, bot, msg_from_user, db).await?;
+    telepirate_session.process_request(dbrecord, url, filetype).await?;
     Ok(())
 }
 
@@ -318,8 +321,11 @@ async fn voice(
     msg_from_user: Message,
     db: &'static Surreal<DbClient>,
 ) -> HandlerResult {
+    let telepirate_session = TelepirateSession::from(bot, db);
+    let request_id = RequestId::new();
+    let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
     let filetype = FileType::Voice;
-    process_request(url, filetype, bot, msg_from_user, db).await?;
+    telepirate_session.process_request(dbrecord, url, filetype).await?;
     Ok(())
 }
 
