@@ -108,7 +108,7 @@ async fn help(
     db: &'static Surreal<DbClient>,
 ) -> HandlerResult {
     let dbrecord = TelepirateDbRecord::from(msg_from_user);
-    dbrecord.intodb(db);
+    dbrecord.intodb(db).await.unwrap();
     let command_descriptions = Command::descriptions().to_string();
     info!("User @{} asked for /help.", dbrecord.username);
     send_and_remember_msg(bot, dbrecord.chat_id, db, &command_descriptions).await;
