@@ -32,12 +32,12 @@ pub struct TelepirateDbRecord {
     pub request_id: RequestId,
 }
 impl TelepirateDbRecord {
-    pub fn from(message: Message) -> Self {
+    pub fn from(message: Message, request_id: RequestId) -> Self {
         TelepirateDbRecord {
             chat_id: message.chat.id,
             message_id: message.id,
             username: getuser(&message),
-            request_id: RequestId::new(),
+            request_id,
         }
     }
     pub async fn intodb(&self, db: &Surreal<DbClient>) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -64,8 +64,14 @@ impl TelepirateDbRecord {
         let sql = format!("math::max(SELECT VALUE message_id.message_id FROM {} WHERE chat_id = {});", CRATE_NAME, self.chat_id);
         let mut query_response = db.query(sql).await?;
         let last_message_from_chat = query_response.take::<Option<i32>>(0)?.map(MessageId);
-        dbg!(&last_message_from_chat);
         Ok(last_message_from_chat)
+    }
+    pub async fn fromdb_delete_all_by_chat_id(&self, db: &Surreal<DbClient>) -> Result<(), Box<dyn Error + Send + Sync>> {
+        trace!("Deleting all records related to Chat ID {} from the DB ...", self.chat_id);
+        let sql = format!("DELETE {} WHERE chat_id = {};", CRATE_NAME, self.chat_id);
+        let mut query_response = db.query(sql).await?;
+        let _ = query_response.take::<Vec<Self>>(0)?;
+        Ok(())
     }
 }
 

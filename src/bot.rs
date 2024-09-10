@@ -102,18 +102,71 @@ async fn start(
     Ok(())
 }
 
+struct TelepirateSession {
+    bot: &'static Bot,
+    db: &'static Surreal<DbClient>,
+}
+impl TelepirateSession {
+    fn from(bot: &'static Bot, db: &'static Surreal<DbClient>) -> Self {
+        TelepirateSession {
+            bot,
+            db,
+        }
+    }
+    async fn send_and_remember_msg(self, reference: TelepirateDbRecord, text: &str) {
+        let text_chunks = split_text(text);
+        let mut chunk_index: usize = 0;
+        trace!("Message chunks to send: {}.", text_chunks.len());
+        for chunk in text_chunks {
+            chunk_index += 1;
+            trace!(
+                "Sending text message {} of length {} ...",
+                chunk_index,
+                chunk.len()
+            );
+            let message_result = self.bot.send_message(reference.chat_id, chunk).await;
+            match message_result {
+                Ok(message) => {
+                    let new_dbrecord = TelepirateDbRecord::from(message, reference.request_id.clone());
+                    new_dbrecord.intodb(self.db).await.unwrap_or_else(
+                        |warning| warn!("Failed create a DB record: {}", warning)
+                    );
+                }
+                Err(msg_error) => {
+                    warn!("Failed to send message: {}", msg_error);
+                }
+            }
+        }
+    }
+    async fn purge_all_trash_messages(self, reference: TelepirateDbRecord) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let ids = reference.msg_ids_fromdb_by_chat_id(self.db).await?;
+        for id in ids.into_iter() {
+            trace!("Deleting Message ID {} from Chat {} ...", id.0, reference.chat_id);
+            match self.bot.delete_message(reference.chat_id, id).await {
+                Err(e) => {
+                    error!("Can't delete a message: {}", e);
+                }
+                _ => {}
+            }
+        }
+        reference.fromdb_delete_all_by_chat_id(self.db).await.unwrap();
+        Ok(())
+    }
+}
+
+use crate::database::RequestId;
 async fn help(
     bot: &'static Bot,
     msg_from_user: Message,
     db: &'static Surreal<DbClient>,
 ) -> HandlerResult {
-    let dbrecord = TelepirateDbRecord::from(msg_from_user);
+    let telepirate_session = TelepirateSession::from(bot, db);
+    let request_id = RequestId::new();
+    let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
     dbrecord.intodb(db).await.unwrap();
     let command_descriptions = Command::descriptions().to_string();
     info!("User @{} asked for /help.", dbrecord.username);
-    send_and_remember_msg(bot, dbrecord.chat_id, db, &command_descriptions).await;
-    database::intodb(dbrecord.chat_id, dbrecord.message_id, db).await?;
-    dbrecord.msg_id_fromdb_last(db).await.unwrap();
+    telepirate_session.send_and_remember_msg(dbrecord, &command_descriptions).await;
     Ok(())
 }
 
@@ -155,11 +208,12 @@ async fn clear(
     msg_from_user: Message,
     db: &'static Surreal<DbClient>,
 ) -> HandlerResult {
-    let chat_id = msg_from_user.chat.id;
-    let msg_id = msg_from_user.id;
-    database::intodb(chat_id, msg_id, db).await?;
-    purge_trash_messages(chat_id, db, bot).await?;
-    info!("User @{} has cleaned up the chat.", getuser(&msg_from_user));
+    let telepirate_session = TelepirateSession::from(bot, db);
+    let request_id = RequestId::new();
+    let dbrecord = TelepirateDbRecord::from(msg_from_user.clone(), request_id);
+    dbrecord.intodb(db).await.unwrap();
+    telepirate_session.purge_all_trash_messages(dbrecord.clone()).await.unwrap();
+    info!("User @{} has cleaned up the chat.", dbrecord.username);
     Ok(())
 }
 
