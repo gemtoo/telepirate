@@ -1,5 +1,5 @@
 use crate::{
-    database::{self, forget_deleted_messages, get_last_message_id, TelepirateDbRecord},
+    database::{self, TelepirateDbRecord},
     misc::*,
     pirate::{self, FileType},
 };
@@ -13,7 +13,8 @@ use teloxide::types::InputFile;
 use teloxide::types::MessageId;
 use teloxide::{dispatching::UpdateHandler, prelude::*, utils::command::BotCommands};
 use tokio::task;
-use uuid::Uuid;
+use tokio::sync::watch;
+use std::path::PathBuf;
 
 type HandlerResult = Result<(), Box<dyn Error + Send + Sync>>;
 
@@ -85,21 +86,6 @@ async fn handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 's
     let message_handler = Update::filter_message().branch(command_handler);
 
     return message_handler;
-}
-
-async fn start(
-    bot: &'static Bot,
-    msg_from_user: Message,
-    db: &'static Surreal<DbClient>,
-) -> HandlerResult {
-    let chat_id = msg_from_user.chat.id;
-    let msg_id = msg_from_user.id;
-    let username = getuser(&msg_from_user);
-    let command_descriptions = Command::descriptions().to_string();
-    info!("User @{} has /start'ed the bot.", username);
-    send_and_remember_msg(bot, chat_id, db, &command_descriptions).await;
-    database::intodb(chat_id, msg_id, db).await?;
-    Ok(())
 }
 
 #[derive(Clone)]
@@ -271,6 +257,21 @@ impl TelepirateSession {
     }
 }
 
+async fn start(
+    bot: &'static Bot,
+    msg_from_user: Message,
+    db: &'static Surreal<DbClient>,
+) -> HandlerResult {
+    let telepirate_session = TelepirateSession::from(bot, db);
+    let request_id = RequestId::new();
+    let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
+    dbrecord.intodb(db).await.unwrap();
+    let command_descriptions = Command::descriptions().to_string();
+    info!("User @{} has /start'ed the bot.", dbrecord.username);
+    telepirate_session.send_and_remember_msg(&dbrecord, &command_descriptions).await;
+    Ok(())
+}
+
 use crate::database::RequestId;
 async fn help(
     bot: &'static Bot,
@@ -360,161 +361,6 @@ pub fn getuser(msg_from_user: &Message) -> String {
     return username;
 }
 
-async fn purge_trash_messages(
-    chat_id: ChatId,
-    db: &Surreal<DbClient>,
-    bot: &Bot,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let ids = database::get_trash_message_ids(chat_id, db).await?;
-    for id in ids.into_iter() {
-        trace!("Deleting Message ID {} from Chat {} ...", id.0, chat_id.0);
-        match bot.delete_message(chat_id, id).await {
-            Err(e) => {
-                error!("Can't delete a message: {}", e);
-            }
-            _ => {}
-        }
-    }
-    forget_deleted_messages(chat_id, db).await?;
-    Ok(())
-}
-
-use tokio::sync::watch;
-async fn process_request(
-    url: String,
-    filetype: FileType,
-    bot: &Bot,
-    msg_from_user: Message,
-    db: &Surreal<DbClient>,
-) -> HandlerResult {
-    debug!("Processing request ...");
-    let chat_id = msg_from_user.chat.id;
-    let msg_id = msg_from_user.id;
-    let username = getuser(&msg_from_user);
-    info!("User @{} asked for /{}.", &username, filetype.as_str());
-    database::intodb(chat_id, msg_id, db).await?;
-    if url_is_valid(&url) {
-        send_and_remember_msg(bot, chat_id, db, "Downloading... Please wait.").await;
-        let last_message_id = get_last_message_id(chat_id, db).await?;
-        // UUID is used because thats my choice.
-        let download_id = "Uuid::new_v4()".to_string();
-        // Channel is created because we need a way to exit a poller task after the request is done.
-        // This can be gracefully done only by sending a signal through the channel.
-        let (tx, rx) = watch::channel(false);
-        let poller_handle = run_directory_size_poller_and_mesage_updater(
-            rx,
-            chat_id,
-            last_message_id,
-            download_id.clone(),
-            filetype.clone(),
-            bot.clone(),
-        )
-        .await;
-        let downloads_result = match &filetype {
-            FileType::Mp3 => task::spawn_blocking(move || pirate::mp3(url, download_id)).await,
-            FileType::Mp4 => task::spawn_blocking(move || pirate::mp4(url, download_id)).await,
-            FileType::Voice => task::spawn_blocking(move || pirate::ogg(url, download_id)).await,
-        }?;
-        match downloads_result {
-            Err(error) => {
-                warn!("{}", error);
-                send_and_remember_msg(bot, chat_id, db, &error.to_string()).await;
-            }
-            Ok(files) => {
-                trace!(
-                    "All files are ready. Finishing poller task for Chat ID {} ...",
-                    chat_id
-                );
-                let _ = tx.send(true);
-                poller_handle.await?;
-                for path in files.paths.iter() {
-                    send_file(path, &username, &filetype, bot, chat_id, db).await;
-                }
-                purge_trash_messages(chat_id, db, bot).await?;
-                cleanup(files.folder);
-            }
-        }
-    } else {
-        let ftype = filetype.as_str();
-        let correct_usage = match &filetype {
-            FileType::Voice => {
-                format!("Correct usage:\n\n/voice https://valid_audio_url")
-            }
-            _ => {
-                format!("Correct usage:\n\n/{} https://valid_{}_url", ftype, ftype)
-            }
-        };
-        send_and_remember_msg(bot, chat_id, db, &correct_usage).await;
-        info!("Reminded user @{} of a correct /{} usage.", username, ftype);
-    }
-    Ok(())
-}
-
-use std::path::PathBuf;
-async fn send_file(
-    path: &PathBuf,
-    username: &str,
-    filetype: &FileType,
-    bot: &Bot,
-    chat_id: ChatId,
-    db: &Surreal<DbClient>,
-) {
-    let file = InputFile::file(path);
-    let filename = path.file_name().unwrap().to_str().unwrap();
-    trace!("Sending '{}' to @{} ...", filename, &username);
-    let sending_result;
-    match filetype {
-        FileType::Mp3 => {
-            sending_result = bot.send_audio(chat_id, file).await;
-        }
-        FileType::Mp4 => {
-            sending_result = bot.send_video(chat_id, file).await;
-        }
-        FileType::Voice => {
-            sending_result = bot.send_voice(chat_id, file).await;
-        }
-    }
-    match sending_result {
-        Ok(_) => {
-            info!(
-                "File '{}' has been successfully delivered to @{}.",
-                filename, username
-            );
-            return;
-        }
-        Err(error) => {
-            let error_text = format!("File sending error: {}", error);
-            warn!("{}", error_text);
-            send_and_remember_msg(bot, chat_id, db, &error_text).await;
-        }
-    }
-}
-
-async fn send_and_remember_msg(bot: &Bot, chat_id: ChatId, db: &Surreal<DbClient>, text: &str) {
-    let text_chunks = split_text(text);
-    let mut chunk_index: usize = 0;
-    trace!("Message chunks to send: {}.", text_chunks.len());
-    for chunk in text_chunks {
-        chunk_index += 1;
-        trace!(
-            "Sending text message {} of length {} ...",
-            chunk_index,
-            chunk.len()
-        );
-        let message_result = bot.send_message(chat_id, chunk).await;
-        match message_result {
-            Ok(message) => {
-                if let Err(db_error) = database::intodb(chat_id, message.id, db).await {
-                    warn!("Failed to record a message into DB: {}", db_error);
-                }
-            }
-            Err(msg_error) => {
-                warn!("Failed to send message: {}", msg_error);
-            }
-        }
-    }
-}
-
 async fn run_directory_size_poller_and_mesage_updater(
     mut rx: watch::Receiver<bool>,
     chat_id: ChatId,
@@ -546,7 +392,7 @@ async fn run_directory_size_poller_and_mesage_updater(
                         &download_id, folder_data.file_count, folder_data.format_bytes_to_megabytes()
                     );
                     let update_text = format!(
-                        "Downloading... Please wait.\nFiles downloaded: {}.\nTotal size of files: {}.",
+                        "Downloading... Please wait.\nFiles to send: {}.\nTotal size of files: {}.",
                         folder_data.file_count,
                         folder_data.format_bytes_to_megabytes(),
                     );

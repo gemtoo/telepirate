@@ -6,7 +6,6 @@ use regex::Regex;
 use std::error::Error;
 use std::path::PathBuf;
 use std::time::SystemTime;
-use uuid::Uuid;
 use ytd_rs::{Arg, YoutubeDL};
 
 type DownloadsResult = Result<Downloads, Box<dyn Error + Send + Sync>>;
