@@ -61,9 +61,9 @@ impl TelepirateDbRecord {
     }
     pub async fn msg_id_fromdb_last(&self, db: &Surreal<DbClient>) -> Result<Option<MessageId>, Box<dyn Error + Send + Sync>> {
         trace!("Retrieving last message of Chat ID {} ...", self.chat_id);
-        let sql = format!("SELECT VALUE message_id.message_id FROM {} WHERE chat_id = {};", CRATE_NAME, self.chat_id);
+        let sql = format!("math::max(SELECT VALUE message_id.message_id FROM {} WHERE chat_id = {});", CRATE_NAME, self.chat_id);
         let mut query_response = db.query(sql).await?;
-        let last_message_from_chat = query_response.take::<Option<MessageId>>(0)?;
+        let last_message_from_chat = query_response.take::<Option<i32>>(0)?.map(MessageId);
         dbg!(&last_message_from_chat);
         Ok(last_message_from_chat)
     }
