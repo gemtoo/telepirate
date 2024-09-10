@@ -10,17 +10,17 @@ use surrealdb::{
 use teloxide::types::{ChatId, Message, MessageId};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct RequestId(Uuid);
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestId(String);
 impl RequestId {
     pub fn new() -> Self {
-        RequestId(Uuid::new_v4())
+        RequestId(Uuid::new_v4().to_string())
     }
 }
 use std::fmt;
 impl fmt::Display for RequestId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0.to_string())
+        write!(f, "{}", self.0)
     }
 }
 
