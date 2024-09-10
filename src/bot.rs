@@ -113,8 +113,7 @@ async fn help(
     info!("User @{} asked for /help.", dbrecord.username);
     send_and_remember_msg(bot, dbrecord.chat_id, db, &command_descriptions).await;
     database::intodb(dbrecord.chat_id, dbrecord.message_id, db).await?;
-    dbrecord.msg_ids_fromdb_by_request_id(db).await;
-    dbrecord.msg_ids_fromdb_by_chat_id(db).await;
+    dbrecord.msg_id_fromdb_last(db).await;
     Ok(())
 }
 
