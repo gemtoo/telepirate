@@ -1,6 +1,6 @@
 services:
   telepirate:
-    depends:
+    depends_on:
       - surrealdb
       - telegram-api
     container_name: telepirate
