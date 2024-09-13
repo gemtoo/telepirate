@@ -6,7 +6,7 @@ services:
     container_name: telepirate
     build:
       context: .
-      dockerfile: Dockerfile-telepirate
+      dockerfile: ./dockerfiles/Dockerfile-telepirate
     environment:
       - TELOXIDE_TOKEN=${TELOXIDE_TOKEN}
     env_file: ./.env
@@ -16,7 +16,7 @@ services:
   surrealdb:
     container_name: surrealdb
     build:
-      dockerfile: Dockerfile-surrealdb
+      dockerfile: ./dockerfiles/Dockerfile-surrealdb
     volumes:
       - ./dbdata:/persistence
     restart: always
@@ -25,7 +25,7 @@ services:
   telegram-api:
     container_name: telegram-api
     build:
-      dockerfile: Dockerfile-telegram-api
+      dockerfile: ./dockerfiles/Dockerfile-telegram-api
     environment:
       - TELEGRAM_API_ID=${TELEGRAM_API_ID}
       - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
