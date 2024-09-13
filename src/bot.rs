@@ -136,7 +136,7 @@ impl TelepirateSession {
                 _ => {}
             }
         }
-        reference.fromdb_delete_all_by_chat_id(self.db).await.unwrap();
+        reference.fromdb_delete_all_by_chat_id(self.db).await?;
         Ok(())
     }
     async fn purge_request_id_trash_messages(&self, reference: &TelepirateDbRecord) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -150,7 +150,7 @@ impl TelepirateSession {
                 _ => {}
             }
         }
-        reference.fromdb_delete_all_by_request_id(self.db).await.unwrap();
+        reference.fromdb_delete_all_by_request_id(self.db).await?;
         Ok(())
     }
     async fn process_request(
@@ -163,7 +163,7 @@ impl TelepirateSession {
         let chat_id = reference.chat_id;
         let username = &reference.username;
         info!("User @{} asked for /{}.", &username, filetype.as_str());
-        reference.intodb(self.db).await.unwrap();
+        reference.intodb(self.db).await?;
         if url_is_valid(&url) {
             self.send_and_remember_msg(&reference, "Downloading... Please wait.").await;
             let last_message_id = reference.msg_id_fromdb_last(self.db).await?.unwrap();
@@ -200,7 +200,7 @@ impl TelepirateSession {
                     for path in files.paths.iter() {
                         self.clone().send_file(&reference, path, &filetype).await;
                     }
-                    self.purge_request_id_trash_messages(&reference).await.unwrap();
+                    self.purge_request_id_trash_messages(&reference).await?;
                     cleanup(files.folder);
                 }
             }
@@ -265,7 +265,7 @@ async fn start(
     let telepirate_session = TelepirateSession::from(bot, db);
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
-    dbrecord.intodb(db).await.unwrap();
+    dbrecord.intodb(db).await?;
     let command_descriptions = Command::descriptions().to_string();
     info!("User @{} has /start'ed the bot.", dbrecord.username);
     telepirate_session.send_and_remember_msg(&dbrecord, &command_descriptions).await;
@@ -281,7 +281,7 @@ async fn help(
     let telepirate_session = TelepirateSession::from(bot, db);
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
-    dbrecord.intodb(db).await.unwrap();
+    dbrecord.intodb(db).await?;
     let command_descriptions = Command::descriptions().to_string();
     info!("User @{} asked for /help.", dbrecord.username);
     telepirate_session.send_and_remember_msg(&dbrecord, &command_descriptions).await;
@@ -338,8 +338,8 @@ async fn clear(
     let telepirate_session = TelepirateSession::from(bot, db);
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user.clone(), request_id);
-    dbrecord.intodb(db).await.unwrap();
-    telepirate_session.purge_all_trash_messages(&dbrecord).await.unwrap();
+    dbrecord.intodb(db).await?;
+    telepirate_session.purge_all_trash_messages(&dbrecord).await?;
     info!("User @{} has cleaned up the chat.", dbrecord.username);
     Ok(())
 }
