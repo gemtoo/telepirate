@@ -242,7 +242,13 @@ impl TelepirateSession {
         let max_retries: usize = 10;
         for attempt in 1..=max_retries {
             let sending_result;
-            trace!("Attempt {}/{} at sending '{}' to @{} ...", attempt, max_retries, filename, reference.username);
+            trace!(
+                "Attempt {}/{} at sending '{}' to @{} ...",
+                attempt,
+                max_retries,
+                filename,
+                reference.username
+            );
             match filetype {
                 FileType::Mp3 => {
                     sending_result = self.bot.send_audio(reference.chat_id, file.clone()).await;
@@ -263,7 +269,10 @@ impl TelepirateSession {
                     return;
                 }
                 Err(error) => {
-                    let error_text = format!("File sending error: {}", error);
+                    let error_text = format!(
+                        "Attempt {}/{} at sending '{}'. File sending error: {}",
+                        attempt, max_retries, filename, error
+                    );
                     warn!("{}", error_text);
                     self.send_and_remember_msg(&reference, &error_text).await;
                 }
