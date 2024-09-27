@@ -420,7 +420,8 @@ async fn run_directory_size_poller_and_mesage_updater(
                 tokio::select! {
                     // This case handles the main logic while rx is false.
                     _ = async {
-                    sleep(1).await;
+                    // Update less frequently to avoid getting cooled down by Telegram.
+                    sleep(5).await;
                     trace!("Polling data about Download ID {} ...", download_id);
                     let folder_data = FolderData::from(&path_to_downloads, filetype.clone());
                     trace!(
