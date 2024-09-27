@@ -1,8 +1,8 @@
-use crate::misc::die;
 use crate::bot::getuser;
+use crate::misc::die;
 use crate::CRATE_NAME;
-use std::error::Error;
 use serde::{Deserialize, Serialize};
+use std::error::Error;
 use surrealdb::{
     engine::remote::ws::{Client as DbClient, Ws},
     Surreal,
@@ -41,41 +41,86 @@ impl TelepirateDbRecord {
         }
     }
     pub async fn intodb(&self, db: &Surreal<DbClient>) -> Result<(), Box<dyn Error + Send + Sync>> {
-        trace!("Recording Request ID {}, Message ID {}, Chat ID {} into DB ...", self.request_id, self.message_id, self.chat_id);
+        trace!(
+            "Recording Request ID {}, Message ID {}, Chat ID {} into DB ...",
+            self.request_id,
+            self.message_id,
+            self.chat_id
+        );
         let _: Vec<TelepirateDbRecord> = db.create(CRATE_NAME).content(self).await?;
         Ok(())
     }
-    pub async fn msg_ids_fromdb_by_request_id(&self, db: &Surreal<DbClient>) -> Result<Vec<MessageId>, Box<dyn Error + Send + Sync>> {
-        trace!("Retrieving all messages with Request ID {} and Chat ID {} from DB ...", self.request_id, self.chat_id);
-        let sql = format!("SELECT VALUE message_id FROM {} WHERE request_id = s'{}';", CRATE_NAME, self.request_id);
+    pub async fn msg_ids_fromdb_by_request_id(
+        &self,
+        db: &Surreal<DbClient>,
+    ) -> Result<Vec<MessageId>, Box<dyn Error + Send + Sync>> {
+        trace!(
+            "Retrieving all messages with Request ID {} and Chat ID {} from DB ...",
+            self.request_id,
+            self.chat_id
+        );
+        let sql = format!(
+            "SELECT VALUE message_id FROM {} WHERE request_id = s'{}';",
+            CRATE_NAME, self.request_id
+        );
         let mut query_response = db.query(sql).await?;
         let messages_with_request_id = query_response.take::<Vec<MessageId>>(0)?;
         Ok(messages_with_request_id)
     }
-    pub async fn msg_ids_fromdb_by_chat_id(&self, db: &Surreal<DbClient>) -> Result<Vec<MessageId>, Box<dyn Error + Send + Sync>> {
-        trace!("Retrieving all messages of Chat ID {} from DB ...", self.chat_id);
-        let sql = format!("SELECT VALUE message_id FROM {} WHERE chat_id = {};", CRATE_NAME, self.chat_id);
+    pub async fn msg_ids_fromdb_by_chat_id(
+        &self,
+        db: &Surreal<DbClient>,
+    ) -> Result<Vec<MessageId>, Box<dyn Error + Send + Sync>> {
+        trace!(
+            "Retrieving all messages of Chat ID {} from DB ...",
+            self.chat_id
+        );
+        let sql = format!(
+            "SELECT VALUE message_id FROM {} WHERE chat_id = {};",
+            CRATE_NAME, self.chat_id
+        );
         let mut query_response = db.query(sql).await?;
         let all_messages_from_chat = query_response.take::<Vec<MessageId>>(0)?;
         Ok(all_messages_from_chat)
     }
-    pub async fn msg_id_fromdb_last(&self, db: &Surreal<DbClient>) -> Result<Option<MessageId>, Box<dyn Error + Send + Sync>> {
+    pub async fn msg_id_fromdb_last(
+        &self,
+        db: &Surreal<DbClient>,
+    ) -> Result<Option<MessageId>, Box<dyn Error + Send + Sync>> {
         trace!("Retrieving last message of Chat ID {} ...", self.chat_id);
-        let sql = format!("math::max(SELECT VALUE message_id.message_id FROM {} WHERE chat_id = {});", CRATE_NAME, self.chat_id);
+        let sql = format!(
+            "math::max(SELECT VALUE message_id.message_id FROM {} WHERE chat_id = {});",
+            CRATE_NAME, self.chat_id
+        );
         let mut query_response = db.query(sql).await?;
         let last_message_from_chat = query_response.take::<Option<i32>>(0)?.map(MessageId);
         Ok(last_message_from_chat)
     }
-    pub async fn fromdb_delete_all_by_chat_id(&self, db: &Surreal<DbClient>) -> Result<(), Box<dyn Error + Send + Sync>> {
-        trace!("Deleting all records related to Chat ID {} from the DB ...", self.chat_id);
+    pub async fn fromdb_delete_all_by_chat_id(
+        &self,
+        db: &Surreal<DbClient>,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        trace!(
+            "Deleting all records related to Chat ID {} from the DB ...",
+            self.chat_id
+        );
         let sql = format!("DELETE {} WHERE chat_id = {};", CRATE_NAME, self.chat_id);
         let mut query_response = db.query(sql).await?;
         let _ = query_response.take::<Vec<Self>>(0)?;
         Ok(())
     }
-    pub async fn fromdb_delete_all_by_request_id(&self, db: &Surreal<DbClient>) -> Result<(), Box<dyn Error + Send + Sync>> {
-        trace!("Deleting all records related to Request ID {} from the DB ...", self.request_id);
-        let sql = format!("DELETE {} WHERE request_id = s'{}';", CRATE_NAME, self.request_id);
+    pub async fn fromdb_delete_all_by_request_id(
+        &self,
+        db: &Surreal<DbClient>,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        trace!(
+            "Deleting all records related to Request ID {} from the DB ...",
+            self.request_id
+        );
+        let sql = format!(
+            "DELETE {} WHERE request_id = s'{}';",
+            CRATE_NAME, self.request_id
+        );
         let mut query_response = db.query(sql).await?;
         let _ = query_response.take::<Vec<Self>>(0)?;
         Ok(())

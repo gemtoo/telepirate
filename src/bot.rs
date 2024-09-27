@@ -6,15 +6,15 @@ use crate::{
 use dptree::case;
 use reqwest::Client as ReqwestClient;
 use std::error::Error;
+use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb::{engine::remote::ws::Client as DbClient, Surreal};
 use teloxide::types::ChatKind;
 use teloxide::types::InputFile;
 use teloxide::types::MessageId;
 use teloxide::{dispatching::UpdateHandler, prelude::*, utils::command::BotCommands};
-use tokio::task;
 use tokio::sync::watch;
-use std::path::PathBuf;
+use tokio::task;
 
 type HandlerResult = Result<(), Box<dyn Error + Send + Sync>>;
 
@@ -95,10 +95,7 @@ struct TelepirateSession {
 }
 impl TelepirateSession {
     fn from(bot: &'static Bot, db: &'static Surreal<DbClient>) -> Self {
-        TelepirateSession {
-            bot,
-            db,
-        }
+        TelepirateSession { bot, db }
     }
     async fn send_and_remember_msg(&self, reference: &TelepirateDbRecord, text: &str) {
         let text_chunks = split_text(text);
@@ -114,10 +111,12 @@ impl TelepirateSession {
             let message_result = self.bot.send_message(reference.chat_id, chunk).await;
             match message_result {
                 Ok(message) => {
-                    let new_dbrecord = TelepirateDbRecord::from(message, reference.request_id.clone());
-                    new_dbrecord.intodb(self.db).await.unwrap_or_else(
-                        |warning| warn!("Failed create a DB record: {}", warning)
-                    );
+                    let new_dbrecord =
+                        TelepirateDbRecord::from(message, reference.request_id.clone());
+                    new_dbrecord
+                        .intodb(self.db)
+                        .await
+                        .unwrap_or_else(|warning| warn!("Failed create a DB record: {}", warning));
                 }
                 Err(msg_error) => {
                     warn!("Failed to send message: {}", msg_error);
@@ -125,10 +124,17 @@ impl TelepirateSession {
             }
         }
     }
-    async fn purge_all_trash_messages(&self, reference: &TelepirateDbRecord) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn purge_all_trash_messages(
+        &self,
+        reference: &TelepirateDbRecord,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let ids = reference.msg_ids_fromdb_by_chat_id(self.db).await?;
         for id in ids.into_iter() {
-            trace!("Deleting Message ID {} from Chat {} ...", id.0, reference.chat_id);
+            trace!(
+                "Deleting Message ID {} from Chat {} ...",
+                id.0,
+                reference.chat_id
+            );
             match self.bot.delete_message(reference.chat_id, id).await {
                 Err(e) => {
                     error!("Can't delete a message: {}", e);
@@ -139,10 +145,17 @@ impl TelepirateSession {
         reference.fromdb_delete_all_by_chat_id(self.db).await?;
         Ok(())
     }
-    async fn purge_request_id_trash_messages(&self, reference: &TelepirateDbRecord) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn purge_request_id_trash_messages(
+        &self,
+        reference: &TelepirateDbRecord,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let ids = reference.msg_ids_fromdb_by_request_id(self.db).await?;
         for id in ids.into_iter() {
-            trace!("Deleting Message ID {} from Chat {} ...", id.0, reference.chat_id);
+            trace!(
+                "Deleting Message ID {} from Chat {} ...",
+                id.0,
+                reference.chat_id
+            );
             match self.bot.delete_message(reference.chat_id, id).await {
                 Err(e) => {
                     error!("Can't delete a message: {}", e);
@@ -165,7 +178,8 @@ impl TelepirateSession {
         info!("User @{} asked for /{}.", &username, filetype.as_str());
         reference.intodb(self.db).await?;
         if url_is_valid(&url) {
-            self.send_and_remember_msg(&reference, "Downloading... Please wait.").await;
+            self.send_and_remember_msg(&reference, "Downloading... Please wait.")
+                .await;
             let last_message_id = reference.msg_id_fromdb_last(self.db).await?.unwrap();
             let download_id = reference.request_id.clone().to_string();
             // Channel is created because we need a way to exit a poller task after the request is done.
@@ -183,12 +197,15 @@ impl TelepirateSession {
             let downloads_result = match &filetype {
                 FileType::Mp3 => task::spawn_blocking(move || pirate::mp3(url, download_id)).await,
                 FileType::Mp4 => task::spawn_blocking(move || pirate::mp4(url, download_id)).await,
-                FileType::Voice => task::spawn_blocking(move || pirate::ogg(url, download_id)).await,
+                FileType::Voice => {
+                    task::spawn_blocking(move || pirate::ogg(url, download_id)).await
+                }
             }?;
             match downloads_result {
                 Err(error) => {
                     warn!("{}", error);
-                    self.send_and_remember_msg(&reference, &error.to_string()).await
+                    self.send_and_remember_msg(&reference, &error.to_string())
+                        .await
                 }
                 Ok(files) => {
                     trace!(
@@ -219,39 +236,37 @@ impl TelepirateSession {
         }
         Ok(())
     }
-    async fn send_file(
-        self,
-        reference: &TelepirateDbRecord,
-        path: &PathBuf,
-        filetype: &FileType,
-    ) {
+    async fn send_file(self, reference: &TelepirateDbRecord, path: &PathBuf, filetype: &FileType) {
         let file = InputFile::file(path);
         let filename = path.file_name().unwrap().to_str().unwrap();
-        trace!("Sending '{}' to @{} ...", filename, reference.username);
-        let sending_result;
-        match filetype {
-            FileType::Mp3 => {
-                sending_result = self.bot.send_audio(reference.chat_id, file).await;
+        let max_retries: usize = 10;
+        for attempt in 1..=max_retries {
+            let sending_result;
+            trace!("Attempt {}/{} at sending '{}' to @{} ...", attempt, max_retries, filename, reference.username);
+            match filetype {
+                FileType::Mp3 => {
+                    sending_result = self.bot.send_audio(reference.chat_id, file.clone()).await;
+                }
+                FileType::Mp4 => {
+                    sending_result = self.bot.send_video(reference.chat_id, file.clone()).await;
+                }
+                FileType::Voice => {
+                    sending_result = self.bot.send_voice(reference.chat_id, file.clone()).await;
+                }
             }
-            FileType::Mp4 => {
-                sending_result = self.bot.send_video(reference.chat_id, file).await;
-            }
-            FileType::Voice => {
-                sending_result = self.bot.send_voice(reference.chat_id, file).await;
-            }
-        }
-        match sending_result {
-            Ok(_) => {
-                info!(
-                    "File '{}' has been successfully delivered to @{}.",
-                    filename, reference.username
-                );
-                return;
-            }
-            Err(error) => {
-                let error_text = format!("File sending error: {}", error);
-                warn!("{}", error_text);
-                self.send_and_remember_msg(&reference, &error_text).await;
+            match sending_result {
+                Ok(_) => {
+                    info!(
+                        "File '{}' has been successfully delivered to @{}.",
+                        filename, reference.username
+                    );
+                    return;
+                }
+                Err(error) => {
+                    let error_text = format!("File sending error: {}", error);
+                    warn!("{}", error_text);
+                    self.send_and_remember_msg(&reference, &error_text).await;
+                }
             }
         }
     }
@@ -268,7 +283,9 @@ async fn start(
     dbrecord.intodb(db).await?;
     let command_descriptions = Command::descriptions().to_string();
     info!("User @{} has /start'ed the bot.", dbrecord.username);
-    telepirate_session.send_and_remember_msg(&dbrecord, &command_descriptions).await;
+    telepirate_session
+        .send_and_remember_msg(&dbrecord, &command_descriptions)
+        .await;
     Ok(())
 }
 
@@ -284,7 +301,9 @@ async fn help(
     dbrecord.intodb(db).await?;
     let command_descriptions = Command::descriptions().to_string();
     info!("User @{} asked for /help.", dbrecord.username);
-    telepirate_session.send_and_remember_msg(&dbrecord, &command_descriptions).await;
+    telepirate_session
+        .send_and_remember_msg(&dbrecord, &command_descriptions)
+        .await;
     Ok(())
 }
 
@@ -298,7 +317,9 @@ async fn mp3(
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
     let filetype = FileType::Mp3;
-    telepirate_session.process_request(dbrecord, url, filetype).await?;
+    telepirate_session
+        .process_request(dbrecord, url, filetype)
+        .await?;
     Ok(())
 }
 
@@ -312,7 +333,9 @@ async fn mp4(
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
     let filetype = FileType::Mp4;
-    telepirate_session.process_request(dbrecord, url, filetype).await?;
+    telepirate_session
+        .process_request(dbrecord, url, filetype)
+        .await?;
     Ok(())
 }
 
@@ -326,7 +349,9 @@ async fn voice(
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
     let filetype = FileType::Voice;
-    telepirate_session.process_request(dbrecord, url, filetype).await?;
+    telepirate_session
+        .process_request(dbrecord, url, filetype)
+        .await?;
     Ok(())
 }
 
@@ -339,7 +364,9 @@ async fn clear(
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user.clone(), request_id);
     dbrecord.intodb(db).await?;
-    telepirate_session.purge_all_trash_messages(&dbrecord).await?;
+    telepirate_session
+        .purge_all_trash_messages(&dbrecord)
+        .await?;
     info!("User @{} has cleaned up the chat.", dbrecord.username);
     Ok(())
 }
