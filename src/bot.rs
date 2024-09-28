@@ -269,6 +269,8 @@ impl TelepirateSession {
                     return;
                 }
                 Err(error) => {
+                    // In case of "Too many requests" error, cooldown is 10 seconds before sending another message.
+                    sleep(10).await;
                     let error_text = format!(
                         "Attempt {}/{} at sending '{}'. File sending error: {}",
                         attempt, max_retries, filename, error
