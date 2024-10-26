@@ -10,6 +10,7 @@ services:
     environment:
       - TELOXIDE_TOKEN=${TELOXIDE_TOKEN}
     env_file: ./.env
+    init: true
     restart: always
     stop_grace_period: 1s
 
@@ -19,6 +20,7 @@ services:
       dockerfile: ./dockerfiles/Dockerfile-surrealdb
     volumes:
       - ./dbdata:/persistence
+    init: true
     restart: always
     stop_grace_period: 1s
 
@@ -30,6 +32,7 @@ services:
       - TELEGRAM_API_ID=${TELEGRAM_API_ID}
       - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
     env_file: ./.env
+    init: true
     restart: always
     stop_grace_period: 1s
 
