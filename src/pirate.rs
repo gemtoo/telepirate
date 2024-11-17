@@ -55,7 +55,7 @@ pub fn mp4(url: String, download_id: String) -> DownloadsResult {
     let args = vec![
         Arg::new_with_arg("--concurrent-fragments", "100000"),
         Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
-        Arg::new_with_arg("--max-filesize", "50M"),
+        Arg::new_with_arg("--max-filesize", "2000M"),
         Arg::new_with_arg("--output", "%(title)s.mp4"),
         Arg::new("--windows-filenames"),
         Arg::new("--no-write-info-json"),
@@ -131,16 +131,12 @@ fn dl(url: String, args: Vec<Arg>, filetype: FileType, download_id: String) -> D
     trace!("{} {}(s) to send.", file_amount, filetype.as_str());
     if file_amount == 0 {
         cleanup(absolute_destination_path.into());
-        // If no files were downloaded, yt-dlp most likely will provide info.
-        // Otherwise the reason is unknown and requres more in-depth debugging.
         let error_text;
         match ytdresult {
-            Ok(_) => {
-                error_text = "For an unknown reason, no files were downloaded.".to_string();
-                error!("{}", error_text);
+            Ok(traceback) => {
+                error_text = format!("{:?}\n\nFiles larger than 2GB are not supported.", traceback);
             }
             Err(e) => {
-                warn!("{}", &e);
                 error_text = e.to_string();
             }
         }
