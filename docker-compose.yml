@@ -17,10 +17,8 @@ services:
 
   surrealdb:
     container_name: surrealdb
-    build:
-      dockerfile: ./dockerfiles/Dockerfile-surrealdb
-    volumes:
-      - ./dbdata:/persistence
+    image: surrealdb/surrealdb:v1.5.3
+    command: ["start", "--log", "info", "--user", "root", "--pass", "root", "memory"]
     cap_drop:
       - ALL
     restart: always
