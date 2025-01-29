@@ -45,6 +45,7 @@ pub fn mp3(url: String, download_id: String) -> DownloadsResult {
         Arg::new("--extract-audio"),
         Arg::new_with_arg("--audio-format", "mp3"),
         Arg::new_with_arg("--audio-quality", "0"),
+        Arg::new_with_arg("--cookies", "/app/cookies.json"),
     ];
     let filetype = FileType::Mp3;
     let downloaded = dl(url, args, filetype, download_id)?;
@@ -61,6 +62,7 @@ pub fn mp4(url: String, download_id: String) -> DownloadsResult {
         Arg::new("--no-write-info-json"),
         Arg::new("--no-embed-metadata"),
         Arg::new_with_arg("--format", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"),
+        Arg::new_with_arg("--cookies", "/app/cookies.json"),
     ];
     let filetype = FileType::Mp4;
     let downloaded = dl(url, args, filetype, download_id)?;
@@ -77,6 +79,7 @@ pub fn ogg(url: String, download_id: String) -> DownloadsResult {
         Arg::new("--extract-audio"),
         Arg::new_with_arg("--audio-format", "opus"),
         Arg::new_with_arg("--audio-quality", "64K"),
+        Arg::new_with_arg("--cookies", "/app/cookies.json"),
     ];
     let filetype = FileType::Voice;
     let downloaded = dl(url, args, filetype, download_id)?;

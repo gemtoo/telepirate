@@ -14,7 +14,7 @@ Use `/help` command to list all available commands.
 
 #### Minimal system requirements:
 
-Anything that runs Docker and Docker Compose. You don't need a VPS and/or public IP, the bot runs well in home networks that are behind NAT. Initial building of containers takes a lot of RAM so if you're constrained with RAM, consider adding up to 8GB swapfile. Further instructions are tailored to installation on a generic Linux host. Basic command line knowledge is expected to follow the guide.
+Anything that runs Docker and Docker Compose. You don't need a VPS and/or public IP, the bot runs well in home networks that are behind NAT. Further instructions are tailored to installation on a generic Linux host. Basic command line knowledge is expected to follow the guide.
 
 #### Deployment:
 
