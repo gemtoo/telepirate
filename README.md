@@ -33,23 +33,10 @@ TELOXIDE_TOKEN=your_bot's_token_from_step_1
 TELEGRAM_API_ID=your_api_id_from_step_2
 TELEGRAM_API_HASH=your_api_hash_from_step_2
 ```
-6. Build and run the bot:
+6. Next, sign in to YouTube, extract NetScape formatted cookies into `cookies.txt` file and place `cookies.txt` next to `docker-compose.yml`. This is needed to bypass bot checks in YouTube. If you don't have a Google account to sign in, there are cheap @gmail.com accounts available in bulk for sale online.
+7. Build and run the bot:
 ```
 docker compose up -d --build
-```
-7. After the build is done, read TelePirate logs:
-```
-docker logs -f telepirate
-```
-Bot is now running and ready to go if in logs you get the following messages:
-```
-[ 2077-13-37 4:20:14 INFO  ] Started up.
-[ 2077-13-37 4:20:14 TRACE ] Checking dependency yt-dlp ...
-[ 2077-13-37 4:20:18 TRACE ] Checking dependency ffmpeg ...
-[ 2077-13-37 4:20:20 DEBUG ] Initializing the bot ...
-[ 2077-13-37 4:20:20 INFO  ] Connection has been established.
-[ 2077-13-37 4:20:20 DEBUG ] Initializing database ...
-[ 2077-13-37 4:20:20 INFO  ] Database is ready.
 ```
 8. Test the bot by sending it some commands:
 ```
