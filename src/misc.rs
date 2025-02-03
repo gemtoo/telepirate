@@ -75,12 +75,24 @@ impl FolderData {
     pub fn from(path_to_directory: &str, extension: FileType) -> Self {
         let extension_str = extension.as_str();
         // Collect all files of a certain extension.
-        let files: Vec<DirEntry> = WalkDir::new(path_to_directory)
-            .into_iter()
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.path().is_file())
-            .filter(|entry| entry.path().extension() == Some(std::ffi::OsStr::new(extension_str)))
-            .collect();
+        let files: Vec<DirEntry>;
+        if extension_str.contains("mp3") {
+            files = WalkDir::new(path_to_directory)
+                .into_iter()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.path().is_file())
+                .filter(|entry| {
+                    entry.path().extension() == Some(std::ffi::OsStr::new(extension_str))
+                })
+                .collect();
+        } else {
+            files = WalkDir::new(path_to_directory)
+                .into_iter()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.path().is_file())
+                // Filtering by extension is not used in non-mp3 cases because of how yt-dlp handles these files.
+                .collect();
+        }
         let file_count = files.len();
         let mut size_in_bytes = 0;
 
