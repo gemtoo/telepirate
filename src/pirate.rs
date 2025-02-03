@@ -137,7 +137,10 @@ fn dl(url: String, args: Vec<Arg>, filetype: FileType, download_id: String) -> D
         let error_text;
         match ytdresult {
             Ok(traceback) => {
-                error_text = format!("{:?}\n\nFiles larger than 2GB are not supported.", traceback);
+                error_text = format!(
+                    "{:?}\n\nFiles larger than 2GB are not supported.",
+                    traceback
+                );
             }
             Err(e) => {
                 error_text = e.to_string();

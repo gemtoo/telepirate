@@ -103,15 +103,18 @@ impl FolderData {
 // Telegram limits message length to 4096 chars. Thus the message is split into sendable chunks.
 pub fn split_text(text: &str) -> Vec<String> {
     trace!("Splitting text into sendable chunks ...");
-    if text.len() > 4096 {
+    if text.len() > 4096 * 4 {
+        let stringvec =
+            vec!["Error traceback is too large. Read the logs for more info.".to_string()];
+        return stringvec;
+    } else if text.len() > 4096 {
         let stringvec = text
             .as_bytes()
             .chunks(4096)
             .map(|chunk| String::from_utf8_lossy(chunk).to_string())
             .collect::<Vec<String>>();
         return stringvec;
-    } else {
-        let stringvec = vec![text.to_string()];
-        return stringvec;
     }
+    let stringvec = vec![text.to_string()];
+    return stringvec;
 }
