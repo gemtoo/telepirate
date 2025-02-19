@@ -1,6 +1,6 @@
-FROM rust:1.80-bookworm
+FROM debian:bookworm-slim
 
-RUN apt update && apt upgrade -y && apt install -y make git zlib1g-dev libssl-dev gperf cmake clang libc++-dev libc++abi-dev
+RUN apt update && apt upgrade -y && apt install --no-install-recommends -y make git zlib1g-dev libssl-dev gperf cmake clang libc++-dev libc++abi-dev ca-certificates
 RUN git clone --depth 1 --recursive https://github.com/tdlib/telegram-bot-api.git /telegram-bot-api
 
 WORKDIR /telegram-bot-api
