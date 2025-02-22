@@ -6,6 +6,7 @@ use std::error::Error;
 use surrealdb::{
     engine::remote::ws::{Client as DbClient, Ws},
     Surreal,
+    opt::auth::Root,
 };
 use teloxide::types::{ChatId, Message, MessageId};
 use uuid::Uuid;
@@ -47,7 +48,7 @@ impl TelepirateDbRecord {
             self.message_id,
             self.chat_id
         );
-        let _: Vec<TelepirateDbRecord> = db.create(CRATE_NAME).content(self).await?;
+        let _: Option<TelepirateDbRecord> = db.create(CRATE_NAME).content(self.clone()).await?;
         Ok(())
     }
     pub async fn msg_ids_fromdb_by_request_id(
@@ -133,6 +134,10 @@ pub async fn initialize() -> &'static Surreal<DbClient> {
     match db_result {
         Ok(db) => {
             info!("Database is ready.");
+            db.signin( Root {
+                username: "root",
+                password: "root",
+            }).await.unwrap();
             db.use_ns(CRATE_NAME).use_db(CRATE_NAME).await.unwrap();
             let boxed_db = Box::new(db);
             return Box::leak(boxed_db);

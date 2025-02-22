@@ -6,4 +6,4 @@ RUN git clone --depth 1 --recursive https://github.com/tdlib/telegram-bot-api.gi
 WORKDIR /telegram-bot-api
 RUN rm -vrf build && mkdir build && cd build && CXXFLAGS="-stdlib=libc++" CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX:PATH=.. .. && cmake --build . -j $(nproc) --target install
 
-ENTRYPOINT bin/telegram-bot-api --local
+ENTRYPOINT /telegram-bot-api/bin/telegram-bot-api --local
