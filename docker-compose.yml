@@ -28,8 +28,7 @@ services:
 
   telegram-api:
     container_name: telegram-api
-    build:
-      dockerfile: ./dockerfiles/Dockerfile-telegram-api
+    image: telegram-api
     environment:
       - TELEGRAM_API_ID=${TELEGRAM_API_ID}
       - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
@@ -40,6 +39,6 @@ services:
     stop_grace_period: 1s
 
 networks:
-  piranet:
-    name: piranet
-    driver: bridge
+  default:
+    name: telepirate
+    external: true

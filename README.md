@@ -34,11 +34,19 @@ TELEGRAM_API_ID=your_api_id_from_step_2
 TELEGRAM_API_HASH=your_api_hash_from_step_2
 ```
 6. Next, sign in to YouTube, extract NetScape formatted cookies into `cookies.txt` file and place `cookies.txt` next to `docker-compose.yml`. This is needed to bypass bot checks in YouTube. If you don't have a Google account to sign in, there are cheap @gmail.com accounts available in bulk for sale online.
-7. Build and run the bot:
+7. Create a dedicated Docker network for the bot:
+```
+docker network create telepirate
+```
+8. Build Telegram Bot API image:
+```
+docker build -f dockerfiles/Dockerfile-telegram-api -t telegram-api .
+```
+9. Build and run the bot:
 ```
 docker compose up -d --build
 ```
-8. Test the bot by sending it some commands:
+10. Test the bot by sending it some commands:
 ```
 /start
 /help
