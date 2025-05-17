@@ -4,7 +4,7 @@ pub const CRATE_NAME: &str = module_path!();
 pub const FILE_STORAGE: &str = "/tmp/telepirate-downloads";
 mod bot;
 mod database;
-mod logger;
+mod tracing;
 mod misc;
 mod pirate;
 

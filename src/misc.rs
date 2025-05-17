@@ -29,8 +29,8 @@ pub fn update() {
 }
 
 pub fn boot() {
-    use crate::logger;
-    logger::init();
+    use crate::tracing;
+    tracing::init();
     checkdep("yt-dlp");
     checkdep("ffmpeg");
     let _ = ctrlc::set_handler(move || {
