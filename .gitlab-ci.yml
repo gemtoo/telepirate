@@ -54,6 +54,7 @@ stages:
         .
 
 .deploy-template: &deploy-template
+  stage: deploy
   image: docker:28-cli
   before_script:
     - apk add --no-cache openssh-client gettext rsync
