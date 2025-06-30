@@ -1,0 +1,13 @@
+services:
+  telepirate:
+    image: ${CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_SEMANTIC_TAG}
+    depends_on:
+      - surrealdb
+      - telegram-bot-api
+    container_name: telepirate
+    environment:
+      - TELOXIDE_TOKEN=${TELOXIDE_TOKEN}
+    cap_drop:
+      - ALL
+    restart: always
+    stop_grace_period: 0s

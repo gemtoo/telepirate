@@ -1,0 +1,4 @@
+/target
+/dbdata
+/dockerfiles
+/docker-compose.yml

@@ -1,0 +1,34 @@
+services:
+  telepirate:
+    depends_on:
+      - surrealdb
+      - telegram-bot-api
+    container_name: telepirate
+    image: gemtoo/telepirate:latest
+    environment:
+      - TELOXIDE_TOKEN=${TELOXIDE_TOKEN}
+    env_file: ./.env
+    cap_drop:
+      - ALL
+    restart: always
+    stop_grace_period: 0s
+
+  surrealdb:
+    container_name: surrealdb
+    image: surrealdb/surrealdb:v2.3.2
+    command: ["start", "--log", "info", "--user", "root", "--pass", "root", "memory"]
+    cap_drop:
+      - ALL
+    restart: always
+    stop_grace_period: 0s
+
+  telegram-bot-api:
+    image: gemtoo/telegram-bot-api:latest
+    environment:
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
+    env_file: ./.env
+    cap_drop:
+      - ALL
+    restart: always
+    stop_grace_period: 0s

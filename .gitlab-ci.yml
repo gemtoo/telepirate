@@ -1,0 +1,131 @@
+stages:
+  - build
+  - deploy
+
+.build-template: &build-template
+  stage: build
+  image:
+    name: docker:28-cli
+    entrypoint: [""]
+  services:
+    - name: docker:28-dind
+      alias: docker
+      command:
+        - dockerd
+        - --host=tcp://0.0.0.0:2375
+        - --host=unix:///var/run/docker.sock
+        - --storage-driver=overlay2
+        - --ipv6
+        - --fixed-cidr-v6=fd69:ace:ace::/80
+  variables:
+    DOCKER_HOST: tcp://docker:2375/
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_BUILDKIT: 1
+    BUILDKIT_PROGRESS: plain
+    BUILDX_CACHE_FLAGS: ""
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+    - |
+      if [ "$CI_ENVIRONMENT_NAME" = "prod" ]; then
+        echo "$PUB_CI_REGISTRY_PASSWORD" | docker login -u "$PUB_CI_REGISTRY_USER" --password-stdin $PUB_CI_REGISTRY
+      fi
+  script:
+    - |
+      if ! docker buildx inspect cibuilder; then
+        docker buildx create --use --name cibuilder
+      fi
+    - |
+      # docker.io tags added only when the environment is prod
+      if [ "$CI_ENVIRONMENT_NAME" = "prod" ]; then
+        PUB_TAGS="\
+          --tag ${PUB_CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_SEMANTIC_TAG} \
+          --tag ${PUB_CI_REGISTRY_IMAGE}:latest"
+      fi
+
+      docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        --push \
+        --tag ${CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_HASH_TAG} \
+        --tag ${CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_SEMANTIC_TAG} \
+        --tag ${CI_REGISTRY_IMAGE}:latest \
+        --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache-image,mode=max,compression=zstd \
+        --cache-from=type=registry,ref=$CI_REGISTRY_IMAGE/cache-image \
+        $PUB_TAGS \
+        .
+
+.deploy-template: &deploy-template
+  image: docker:28-cli
+  before_script:
+    - apk add --no-cache openssh-client gettext rsync
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+    - chmod 600 ~/.ssh/id_ed25519
+    - eval "$(ssh-agent -s)"
+    - ssh-add ~/.ssh/id_ed25519
+    - ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
+    - echo "$CI_JOB_TOKEN" | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
+  script:
+    - cp -v "$ENV" .env
+    - set -a && source .env && set +a
+    - envsubst < deploy-docker-compose.template > deploy-docker-compose.yml
+    - docker context create remote --description "remote docker host" --docker "host=ssh://$SSH_USER@$HOST"
+    - docker context use remote
+    - docker context ls
+    - docker-compose --context remote -f deploy-docker-compose.yml pull -q
+    - docker-compose --context remote -f deploy-docker-compose.yml up -d
+
+get_version:
+  stage: .pre
+  image:
+    name: alpine/git:latest
+    entrypoint: [""]
+  script:
+    - DOCKER_IMAGE_HASH_TAG=$(git describe --tags --always)
+    - DOCKER_IMAGE_SEMANTIC_TAG=$(cat VERSION)
+    - echo "DOCKER_IMAGE_HASH_TAG=${DOCKER_IMAGE_HASH_TAG}" >> build.env
+    - echo "DOCKER_IMAGE_SEMANTIC_TAG=${DOCKER_IMAGE_SEMANTIC_TAG}" >> build.env
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      when: always
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+      when: always
+    - when: never
+  artifacts:
+    reports:
+      dotenv: build.env
+
+build_and_save_dev:
+  <<: *build-template
+  environment:
+    name: dev
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+      when: always
+    - when: never
+
+build_and_save_prod:
+  <<: *build-template
+  environment:
+    name: prod
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      when: always
+    - when: never
+
+deploy_dev:
+  <<: *deploy-template
+  environment:
+    name: dev
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+      when: always
+    - when: never
+
+deploy_prod:
+  <<: *deploy-template
+  environment:
+    name: prod
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      when: always
+    - when: never
