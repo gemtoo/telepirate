@@ -1,4 +1,10 @@
 /target
 /dbdata
-/dockerfiles
+/Dockerfile
 /docker-compose.yml
+/deploy-docker-compose.template
+/LICENSE
+/README.md
+/.git
+/.gitignore
+/.gitlab-ci.yml

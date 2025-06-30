@@ -35,22 +35,25 @@ stages:
         docker buildx create --use --name cibuilder
       fi
     - |
-      # docker.io tags added only when the environment is prod
-      if [ "$CI_ENVIRONMENT_NAME" = "prod" ]; then
-        PUB_TAGS="\
+      if [ "$CI_ENVIRONMENT_NAME" = "dev" ]; then
+        CONDITIONAL_FLAGS="\
+          --platform linux/amd64 \
+          --tag ${CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_HASH_TAG} \
+          --tag ${CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_SEMANTIC_TAG} \
+          --tag ${CI_REGISTRY_IMAGE}:latest"
+      # docker.io tags and building for arm64 are needed only when going public.
+      elif [ "$CI_ENVIRONMENT_NAME" = "prod" ]; then
+        CONDITIONAL_FLAGS="\
+          --platform linux/amd64,linux/arm64 \
           --tag ${PUB_CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_SEMANTIC_TAG} \
           --tag ${PUB_CI_REGISTRY_IMAGE}:latest"
       fi
 
       docker buildx build \
-        --platform linux/amd64,linux/arm64 \
         --push \
-        --tag ${CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_HASH_TAG} \
-        --tag ${CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_SEMANTIC_TAG} \
-        --tag ${CI_REGISTRY_IMAGE}:latest \
         --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache-image,mode=max,compression=zstd \
         --cache-from=type=registry,ref=$CI_REGISTRY_IMAGE/cache-image \
-        $PUB_TAGS \
+        $CONDITIONAL_FLAGS \
         .
 
 .deploy-template: &deploy-template
@@ -59,11 +62,11 @@ stages:
   before_script:
     - apk add --no-cache openssh-client gettext rsync
     - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+    - echo "$SSH_PRIVATE_KEY_BASE64" | base64 -d > ~/.ssh/id_ed25519
     - chmod 600 ~/.ssh/id_ed25519
     - eval "$(ssh-agent -s)"
     - ssh-add ~/.ssh/id_ed25519
-    - ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
+    - ssh-keyscan $HOST >> ~/.ssh/known_hosts
     - echo "$CI_JOB_TOKEN" | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
   script:
     - cp -v "$ENV" .env
