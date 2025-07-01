@@ -119,7 +119,7 @@ deploy_dev:
     name: dev
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
-      when: always
+      when: on_success
     - when: never
 
 deploy_prod:
@@ -128,5 +128,5 @@ deploy_prod:
     name: prod
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
-      when: always
+      when: on_success
     - when: never
