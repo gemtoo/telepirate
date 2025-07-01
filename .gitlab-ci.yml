@@ -35,7 +35,7 @@ stages:
         docker buildx create --use --name cibuilder
       fi
     - |
-      # docker.io tags and building for arm64 are needed only when going public.
+      # Public registry tags and building for arm64 are needed only when going public.
       if [ "$CI_ENVIRONMENT_NAME" = "prod" ]; then
         CONDITIONAL_FLAGS="\
           --platform linux/amd64,linux/arm64 \
@@ -68,6 +68,11 @@ stages:
   script:
     - cp -v "$ENV" .env
     - set -a && source .env && set +a
+    # Production deployment should use image from the public registry.
+    - |
+      if [ "$CI_ENVIRONMENT_NAME" = "prod" ]; then
+        export CI_REGISTRY_IMAGE=${PUB_CI_REGISTRY_IMAGE}
+      fi
     - envsubst < deploy-docker-compose.template > deploy-docker-compose.yml
     - docker context create remote --description "remote docker host" --docker "host=ssh://$SSH_USER@$HOST"
     - docker context use remote
