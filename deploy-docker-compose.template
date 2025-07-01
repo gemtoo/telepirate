@@ -1,7 +1,6 @@
 services:
   telepirate:
     image: ${CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_SEMANTIC_TAG}
-    container_name: telepirate
     environment:
       - TELOXIDE_TOKEN=${TELOXIDE_TOKEN}
     cap_drop:
