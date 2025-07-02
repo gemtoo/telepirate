@@ -35,12 +35,17 @@ stages:
         docker buildx create --use --name cibuilder
       fi
     - |
-      # Public registry tags and building for arm64 are needed only when going public.
+      # Use separate cache tags for dev vs prod.
       if [ "$CI_ENVIRONMENT_NAME" = "prod" ]; then
+        CACHE_TAG="cache-image-prod"
+        # Public registry tags and building for arm64 are needed only when going public.
         CONDITIONAL_FLAGS="\
           --platform linux/amd64,linux/arm64 \
           --tag ${PUB_CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_SEMANTIC_TAG} \
           --tag ${PUB_CI_REGISTRY_IMAGE}:latest"
+      else
+        CACHE_TAG="cache-image-dev"
+        CONDITIONAL_FLAGS="--platform linux/amd64"
       fi
 
       docker buildx build \
@@ -48,8 +53,8 @@ stages:
         --tag ${CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_HASH_TAG} \
         --tag ${CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_SEMANTIC_TAG} \
         --tag ${CI_REGISTRY_IMAGE}:latest \
-        --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache-image,mode=max,compression=zstd \
-        --cache-from=type=registry,ref=$CI_REGISTRY_IMAGE/cache-image \
+        --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/$CACHE_TAG,mode=max,compression=zstd \
+        --cache-from=type=registry,ref=$CI_REGISTRY_IMAGE/$CACHE_TAG \
         $CONDITIONAL_FLAGS \
         .
 
