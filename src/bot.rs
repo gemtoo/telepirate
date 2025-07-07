@@ -15,6 +15,7 @@ use teloxide::types::MessageId;
 use teloxide::{dispatching::UpdateHandler, prelude::*, utils::command::BotCommands};
 use tokio::sync::watch;
 use tokio::task;
+use std::sync::Arc;
 
 type HandlerResult = Result<(), Box<dyn Error + Send + Sync>>;
 
@@ -38,21 +39,23 @@ enum Command {
     C,
 }
 
-fn bot_init() -> &'static Bot {
+fn bot_init() -> Arc<Bot> {
     debug!("Initializing the bot ...");
     let bot_token = match std::env::var("TELOXIDE_TOKEN") {
         Ok(token) => token,
         Err(e) => die(e.to_string()),
     };
+    
     let client = ReqwestClient::builder()
         .timeout(Duration::from_secs(360))
         .build()
         .unwrap_or_else(|error| die(error.to_string()));
+    
     let bot = Bot::with_client(bot_token, client)
         .set_api_url("http://telegram-bot-api:8081".parse().unwrap());
-    let boxed_bot = Box::new(bot);
+    
     info!("Connection has been established.");
-    return Box::leak(boxed_bot);
+    Arc::new(bot)
 }
 
 pub async fn run() {
@@ -61,7 +64,7 @@ pub async fn run() {
     dispatcher(bot, db).await;
 }
 
-async fn dispatcher(bot: &'static Bot, db: &'static Surreal<DbClient>) {
+async fn dispatcher(bot: Arc<Bot>, db: Arc<Surreal<DbClient>>) {
     Dispatcher::builder(bot, handler().await)
         .dependencies(dptree::deps![db])
         .default_handler(|upd| async move {
@@ -90,11 +93,11 @@ async fn handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 's
 
 #[derive(Clone)]
 struct TelepirateSession {
-    bot: &'static Bot,
-    db: &'static Surreal<DbClient>,
+    bot: Arc<Bot>,
+    db: Arc<Surreal<DbClient>>,
 }
 impl TelepirateSession {
-    fn from(bot: &'static Bot, db: &'static Surreal<DbClient>) -> Self {
+    fn from(bot: Arc<Bot>, db: Arc<Surreal<DbClient>>) -> Self {
         TelepirateSession { bot, db }
     }
     async fn send_and_remember_msg(&self, reference: &TelepirateDbRecord, text: &str) {
@@ -114,7 +117,7 @@ impl TelepirateSession {
                     let new_dbrecord =
                         TelepirateDbRecord::from(message, reference.request_id.clone());
                     new_dbrecord
-                        .intodb(self.db)
+                        .intodb(self.db.clone())
                         .await
                         .unwrap_or_else(|warning| warn!("Failed create a DB record: {}", warning));
                 }
@@ -128,7 +131,7 @@ impl TelepirateSession {
         &self,
         reference: &TelepirateDbRecord,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let ids = reference.msg_ids_fromdb_by_chat_id(self.db).await?;
+        let ids = reference.msg_ids_fromdb_by_chat_id(self.db.clone()).await?;
         for id in ids.into_iter() {
             trace!(
                 "Deleting Message ID {} from Chat {} ...",
@@ -142,14 +145,14 @@ impl TelepirateSession {
                 _ => {}
             }
         }
-        reference.fromdb_delete_all_by_chat_id(self.db).await?;
+        reference.fromdb_delete_all_by_chat_id(self.db.clone()).await?;
         Ok(())
     }
     async fn purge_request_id_trash_messages(
         &self,
         reference: &TelepirateDbRecord,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let ids = reference.msg_ids_fromdb_by_request_id(self.db).await?;
+        let ids = reference.msg_ids_fromdb_by_request_id(self.db.clone()).await?;
         for id in ids.into_iter() {
             trace!(
                 "Deleting Message ID {} from Chat {} ...",
@@ -163,7 +166,7 @@ impl TelepirateSession {
                 _ => {}
             }
         }
-        reference.fromdb_delete_all_by_request_id(self.db).await?;
+        reference.fromdb_delete_all_by_request_id(self.db.clone()).await?;
         Ok(())
     }
     async fn process_request(
@@ -176,11 +179,11 @@ impl TelepirateSession {
         let chat_id = reference.chat_id;
         let username = &reference.username;
         info!("User @{} asked for /{}.", &username, filetype.as_str());
-        reference.intodb(self.db).await?;
+        reference.intodb(self.db.clone()).await?;
         if url_is_valid(&url) {
             self.send_and_remember_msg(&reference, "Downloading... Please wait.")
                 .await;
-            let last_message_id = reference.msg_id_fromdb_last(self.db).await?.unwrap();
+            let last_message_id = reference.msg_id_fromdb_last(self.db.clone()).await?.unwrap();
             let download_id = reference.request_id.clone().to_string();
             // Channel is created because we need a way to exit a poller task after the request is done.
             // This can be gracefully done only by sending a signal through the channel.
@@ -284,11 +287,11 @@ impl TelepirateSession {
 }
 
 async fn start(
-    bot: &'static Bot,
+    bot: Arc<Bot>,
     msg_from_user: Message,
-    db: &'static Surreal<DbClient>,
+    db: Arc<Surreal<DbClient>>,
 ) -> HandlerResult {
-    let telepirate_session = TelepirateSession::from(bot, db);
+    let telepirate_session = TelepirateSession::from(bot, db.clone());
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
     dbrecord.intodb(db).await?;
@@ -302,11 +305,11 @@ async fn start(
 
 use crate::database::RequestId;
 async fn help(
-    bot: &'static Bot,
+    bot: Arc<Bot>,
     msg_from_user: Message,
-    db: &'static Surreal<DbClient>,
+    db: Arc<Surreal<DbClient>>,
 ) -> HandlerResult {
-    let telepirate_session = TelepirateSession::from(bot, db);
+    let telepirate_session = TelepirateSession::from(bot, db.clone());
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
     dbrecord.intodb(db).await?;
@@ -320,11 +323,11 @@ async fn help(
 
 async fn mp3(
     url: String,
-    bot: &'static Bot,
+    bot: Arc<Bot>,
     msg_from_user: Message,
-    db: &'static Surreal<DbClient>,
+    db: Arc<Surreal<DbClient>>,
 ) -> HandlerResult {
-    let telepirate_session = TelepirateSession::from(bot, db);
+    let telepirate_session = TelepirateSession::from(bot, db.clone());
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
     let filetype = FileType::Mp3;
@@ -336,11 +339,11 @@ async fn mp3(
 
 async fn mp4(
     url: String,
-    bot: &'static Bot,
+    bot: Arc<Bot>,
     msg_from_user: Message,
-    db: &'static Surreal<DbClient>,
+    db: Arc<Surreal<DbClient>>,
 ) -> HandlerResult {
-    let telepirate_session = TelepirateSession::from(bot, db);
+    let telepirate_session = TelepirateSession::from(bot, db.clone());
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
     let filetype = FileType::Mp4;
@@ -352,11 +355,11 @@ async fn mp4(
 
 async fn voice(
     url: String,
-    bot: &'static Bot,
+    bot: Arc<Bot>,
     msg_from_user: Message,
-    db: &'static Surreal<DbClient>,
+    db: Arc<Surreal<DbClient>>,
 ) -> HandlerResult {
-    let telepirate_session = TelepirateSession::from(bot, db);
+    let telepirate_session = TelepirateSession::from(bot, db.clone());
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user, request_id);
     let filetype = FileType::Voice;
@@ -367,11 +370,11 @@ async fn voice(
 }
 
 async fn clear(
-    bot: &'static Bot,
+    bot: Arc<Bot>,
     msg_from_user: Message,
-    db: &'static Surreal<DbClient>,
+    db: Arc<Surreal<DbClient>>,
 ) -> HandlerResult {
-    let telepirate_session = TelepirateSession::from(bot, db);
+    let telepirate_session = TelepirateSession::from(bot, db.clone());
     let request_id = RequestId::new();
     let dbrecord = TelepirateDbRecord::from(msg_from_user.clone(), request_id);
     dbrecord.intodb(db).await?;
@@ -405,7 +408,7 @@ async fn run_directory_size_poller_and_mesage_updater(
     last_message_id: MessageId,
     download_id: String,
     filetype: FileType,
-    bot: Bot,
+    bot: Arc<Bot>,
 ) -> tokio::task::JoinHandle<()> {
     debug!(
         "Starting poller task for Chat ID {}, Download ID {} ...",

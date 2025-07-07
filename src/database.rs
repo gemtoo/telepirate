@@ -10,6 +10,7 @@ use surrealdb::{
 };
 use teloxide::types::{ChatId, Message, MessageId};
 use uuid::Uuid;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestId(String);
@@ -41,7 +42,7 @@ impl TelepirateDbRecord {
             request_id,
         }
     }
-    pub async fn intodb(&self, db: &Surreal<DbClient>) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub async fn intodb(&self, db: Arc<Surreal<DbClient>>) -> Result<(), Box<dyn Error + Send + Sync>> {
         trace!(
             "Recording Request ID {}, Message ID {}, Chat ID {} into DB ...",
             self.request_id,
@@ -53,7 +54,7 @@ impl TelepirateDbRecord {
     }
     pub async fn msg_ids_fromdb_by_request_id(
         &self,
-        db: &Surreal<DbClient>,
+        db: Arc<Surreal<DbClient>>,
     ) -> Result<Vec<MessageId>, Box<dyn Error + Send + Sync>> {
         trace!(
             "Retrieving all messages with Request ID {} and Chat ID {} from DB ...",
@@ -70,7 +71,7 @@ impl TelepirateDbRecord {
     }
     pub async fn msg_ids_fromdb_by_chat_id(
         &self,
-        db: &Surreal<DbClient>,
+        db: Arc<Surreal<DbClient>>,
     ) -> Result<Vec<MessageId>, Box<dyn Error + Send + Sync>> {
         trace!(
             "Retrieving all messages of Chat ID {} from DB ...",
@@ -86,7 +87,7 @@ impl TelepirateDbRecord {
     }
     pub async fn msg_id_fromdb_last(
         &self,
-        db: &Surreal<DbClient>,
+        db: Arc<Surreal<DbClient>>,
     ) -> Result<Option<MessageId>, Box<dyn Error + Send + Sync>> {
         trace!("Retrieving last message of Chat ID {} ...", self.chat_id);
         let sql = format!(
@@ -99,7 +100,7 @@ impl TelepirateDbRecord {
     }
     pub async fn fromdb_delete_all_by_chat_id(
         &self,
-        db: &Surreal<DbClient>,
+        db: Arc<Surreal<DbClient>>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         trace!(
             "Deleting all records related to Chat ID {} from the DB ...",
@@ -112,7 +113,7 @@ impl TelepirateDbRecord {
     }
     pub async fn fromdb_delete_all_by_request_id(
         &self,
-        db: &Surreal<DbClient>,
+        db: Arc<Surreal<DbClient>>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         trace!(
             "Deleting all records related to Request ID {} from the DB ...",
@@ -128,22 +129,25 @@ impl TelepirateDbRecord {
     }
 }
 
-pub async fn initialize() -> &'static Surreal<DbClient> {
+pub async fn initialize() -> Arc<Surreal<DbClient>> {
     debug!("Initializing database ...");
-    let db_result = Surreal::new::<Ws>("surrealdb:8000").await;
-    match db_result {
-        Ok(db) => {
-            info!("Database is ready.");
-            db.signin( Root {
-                username: "root",
-                password: "root",
-            }).await.unwrap();
-            db.use_ns(CRATE_NAME).use_db(CRATE_NAME).await.unwrap();
-            let boxed_db = Box::new(db);
-            return Box::leak(boxed_db);
-        }
-        Err(e) => {
-            die(e.to_string());
-        }
-    }
+    let db = Surreal::new::<Ws>("surrealdb:8000")
+        .await
+        .unwrap_or_else(|e| die(e.to_string()));
+    
+    info!("Database is ready.");
+    
+    db.signin(Root {
+        username: "root",
+        password: "root",
+    })
+    .await
+    .unwrap_or_else(|e| die(e.to_string()));
+    
+    db.use_ns(CRATE_NAME)
+        .use_db(CRATE_NAME)
+        .await
+        .unwrap_or_else(|e| die(e.to_string()));
+    
+    Arc::new(db)
 }
