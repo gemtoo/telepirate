@@ -1,12 +1,15 @@
-use crate::misc::cleanup;
-use crate::FILE_STORAGE;
-use glob::glob;
-use humantime::format_rfc3339_seconds as timestamp;
-use regex::Regex;
 use std::error::Error;
 use std::path::PathBuf;
 use std::time::SystemTime;
+
+use glob::glob;
+use humantime::format_rfc3339_seconds as timestamp;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
 use ytd_rs::{Arg, YoutubeDL};
+
+use crate::FILE_STORAGE;
+use crate::misc::cleanup;
 
 type DownloadsResult = Result<Downloads, Box<dyn Error + Send + Sync>>;
 
@@ -16,7 +19,8 @@ pub struct Downloads {
     pub folder: PathBuf,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "filetype")]
 pub enum FileType {
     #[default]
     Mp3,
@@ -31,6 +35,24 @@ impl FileType {
             FileType::Mp4 => "mp4",
             FileType::Voice => "opus",
         };
+    }
+    pub fn from_callback_data(data: &str) -> Option<Self> {
+        match data {
+            "Audio" => Some(FileType::Mp3),
+            "Video" => Some(FileType::Mp4),
+            "Audio as voice message" => Some(FileType::Voice),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for FileType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            FileType::Mp3 => write!(f, "audio"),
+            FileType::Mp4 => write!(f, "video"),
+            FileType::Voice => write!(f, "voice message"),
+        }
     }
 }
 

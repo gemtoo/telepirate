@@ -1,153 +1,131 @@
-use crate::bot::getuser;
-use crate::misc::die;
-use crate::CRATE_NAME;
-use serde::{Deserialize, Serialize};
 use std::error::Error;
+use std::fmt::Debug;
+
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use serde_type_name::type_name;
 use surrealdb::{
-    engine::remote::ws::{Client as DbClient, Ws},
     Surreal,
+    engine::remote::ws::{Client as DbClient, Ws},
     opt::auth::Root,
 };
-use teloxide::types::{ChatId, Message, MessageId};
-use uuid::Uuid;
-use std::sync::Arc;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RequestId(String);
-impl RequestId {
-    pub fn new() -> Self {
-        RequestId(Uuid::new_v4().to_string())
-    }
-}
-use std::fmt;
-impl fmt::Display for RequestId {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+use crate::CRATE_NAME;
+use crate::misc::die;
+use crate::task::HasChatId;
+use crate::task::HasTaskId;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TelepirateDbRecord {
-    pub chat_id: ChatId,
-    pub message_id: MessageId,
-    pub username: String,
-    pub request_id: RequestId,
-}
-impl TelepirateDbRecord {
-    pub fn from(message: Message, request_id: RequestId) -> Self {
-        TelepirateDbRecord {
-            chat_id: message.chat.id,
-            message_id: message.id,
-            username: getuser(&message),
-            request_id,
-        }
+/// Defines database operations for records that contain task and chat identifiers
+///
+/// This trait provides CRUD operations for SurrealDB records. It automatically handles:
+/// - Table name derivation using the type name
+/// - Query construction with task_id and chat_id parameters
+/// - Tracing instrumentation for all operations
+///
+/// Requirements for implementors:
+/// - Must be serializable/deserializable (Serde)
+/// - Must contain task_id and chat_id fields (via HasTaskId/HasChatId)
+/// - Must be thread-safe ('static lifetime)
+pub trait DbRecord: Clone + Debug /*+ Display*/ + Serialize + DeserializeOwned + HasTaskId + HasChatId where Self: 'static {
+    /// Inserts the current record into the database
+    ///
+    /// Uses the type name as the database table. Returns the created record
+    /// with any database-generated fields.
+    #[tracing::instrument(skip(self, db), fields(task_id = %self.task_id()))]
+    async fn intodb(&self, db: Surreal<DbClient>) -> Result<Option<Self>, Box<dyn Error + Send + Sync>> {
+        // Derive table name from type
+        let type_name = type_name(self)?;
+        trace!("{} ...", type_name);
+        // Create record in the type-specific table
+        let object_option: Option<Self> = db.create(type_name).content(self.clone()).await?;
+        Ok(object_option)
     }
-    pub async fn intodb(&self, db: Arc<Surreal<DbClient>>) -> Result<(), Box<dyn Error + Send + Sync>> {
-        trace!(
-            "Recording Request ID {}, Message ID {}, Chat ID {} into DB ...",
-            self.request_id,
-            self.message_id,
-            self.chat_id
-        );
-        let _: Option<TelepirateDbRecord> = db.create(CRATE_NAME).content(self.clone()).await?;
-        Ok(())
+
+    /// Retrieves all records matching the current record's task_id
+    ///
+    /// Constructs a parameterized query using the type name as table
+    /// and task_id as filter parameter.
+    #[tracing::instrument(skip(self, db), fields(task_id = %self.task_id()))]
+    async fn select_by_task_id(&self, db: Surreal<DbClient>) -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
+        let type_name = type_name(self)?;
+        trace!("{} ...", type_name);
+
+        // Manual query formatting required because SurrealDB's .bind() method
+        // would wrap the type name in quotes, making it invalid as a table identifier
+        let query_base = format!("SELECT * FROM {} WHERE task_id = $task_id_object", type_name);
+
+        // Execute parameterized query
+        let object_array: Vec<Self> = db.query(&query_base)
+             .bind(("task_id_object", self.task_id())).await?.take(0)?;
+        Ok(object_array)
     }
-    pub async fn msg_ids_fromdb_by_request_id(
-        &self,
-        db: Arc<Surreal<DbClient>>,
-    ) -> Result<Vec<MessageId>, Box<dyn Error + Send + Sync>> {
-        trace!(
-            "Retrieving all messages with Request ID {} and Chat ID {} from DB ...",
-            self.request_id,
-            self.chat_id
-        );
-        let sql = format!(
-            "SELECT VALUE message_id FROM {} WHERE request_id = s'{}';",
-            CRATE_NAME, self.request_id
-        );
-        let mut query_response = db.query(sql).await?;
-        let messages_with_request_id = query_response.take::<Vec<MessageId>>(0)?;
-        Ok(messages_with_request_id)
+
+    /// Retrieves all records matching the current record's chat_id
+    ///
+    /// Uses the same query construction approach as select_by_task_id
+    /// but filters by chat_id instead.
+    #[tracing::instrument(skip(self, db), fields(task_id = %self.task_id()))]
+    async fn select_by_chat_id(&self, db: Surreal<DbClient>) -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
+        let type_name = type_name(self)?;
+        trace!("{} ...", type_name);
+
+        // See note in select_by_task_id about manual query formatting
+        let query_base = format!("SELECT * FROM {} WHERE chat_id = $chat_id_object", type_name);
+
+        let object_array: Vec<Self> = db.query(&query_base)
+             .bind(("chat_id_object", self.chat_id())).await?.take(0)?;
+        Ok(object_array)
     }
-    pub async fn msg_ids_fromdb_by_chat_id(
-        &self,
-        db: Arc<Surreal<DbClient>>,
-    ) -> Result<Vec<MessageId>, Box<dyn Error + Send + Sync>> {
-        trace!(
-            "Retrieving all messages of Chat ID {} from DB ...",
-            self.chat_id
-        );
-        let sql = format!(
-            "SELECT VALUE message_id FROM {} WHERE chat_id = {};",
-            CRATE_NAME, self.chat_id
-        );
-        let mut query_response = db.query(sql).await?;
-        let all_messages_from_chat = query_response.take::<Vec<MessageId>>(0)?;
-        Ok(all_messages_from_chat)
-    }
-    pub async fn msg_id_fromdb_last(
-        &self,
-        db: Arc<Surreal<DbClient>>,
-    ) -> Result<Option<MessageId>, Box<dyn Error + Send + Sync>> {
-        trace!("Retrieving last message of Chat ID {} ...", self.chat_id);
-        let sql = format!(
-            "math::max(SELECT VALUE message_id.message_id FROM {} WHERE chat_id = {});",
-            CRATE_NAME, self.chat_id
-        );
-        let mut query_response = db.query(sql).await?;
-        let last_message_from_chat = query_response.take::<Option<i32>>(0)?.map(MessageId);
-        Ok(last_message_from_chat)
-    }
-    pub async fn fromdb_delete_all_by_chat_id(
-        &self,
-        db: Arc<Surreal<DbClient>>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        trace!(
-            "Deleting all records related to Chat ID {} from the DB ...",
-            self.chat_id
-        );
-        let sql = format!("DELETE {} WHERE chat_id = {};", CRATE_NAME, self.chat_id);
-        let mut query_response = db.query(sql).await?;
-        let _ = query_response.take::<Vec<Self>>(0)?;
-        Ok(())
-    }
-    pub async fn fromdb_delete_all_by_request_id(
-        &self,
-        db: Arc<Surreal<DbClient>>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        trace!(
-            "Deleting all records related to Request ID {} from the DB ...",
-            self.request_id
-        );
-        let sql = format!(
-            "DELETE {} WHERE request_id = s'{}';",
-            CRATE_NAME, self.request_id
-        );
-        let mut query_response = db.query(sql).await?;
-        let _ = query_response.take::<Vec<Self>>(0)?;
-        Ok(())
+
+    /// Deletes all records matching the current record's task_id
+    ///
+    /// Returns the deleted records for confirmation.
+    #[tracing::instrument(skip(self, db), fields(task_id = %self.task_id()))]
+    async fn delete_by_task_id(&self, db: Surreal<DbClient>) -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
+        let type_name = type_name(self)?;
+        trace!("{} ...", type_name);
+
+        // Manual DELETE query with task_id parameter
+        let query_base = format!("DELETE FROM {} WHERE task_id = $task_id_object", type_name);
+
+        let object_array: Vec<Self> = db.query(&query_base)
+             .bind(("task_id_object", self.task_id())).await?.take(0)?;
+        Ok(object_array)
     }
 }
 
-pub async fn initialize() -> Arc<Surreal<DbClient>> {
-    debug!("Initializing database ...");
+/// Initializes and configures the SurrealDB database connection
+///
+/// Performs:
+/// 1. TCP connection to SurrealDB server
+/// 2. Root authentication
+/// 3. Namespace and database selection
+///
+/// Terminates application on any connection failure.
+#[tracing::instrument]
+pub async fn db_init() -> Surreal<DbClient> {
+    debug!("Initializing database connection...");
+
+    // Establish WebSocket connection to SurrealDB
     let db = Surreal::new::<Ws>("surrealdb:8000")
         .await
         .unwrap_or_else(|e| die(e.to_string()));
-    
-    info!("Database is ready.");
-    
+
+    info!("Database connection established.");
+
+    // Authenticate as root user
     db.signin(Root {
         username: "root",
         password: "root",
     })
     .await
     .unwrap_or_else(|e| die(e.to_string()));
-    
+
+    // Select namespace and database (uses crate name)
     db.use_ns(CRATE_NAME)
         .use_db(CRATE_NAME)
         .await
         .unwrap_or_else(|e| die(e.to_string()));
-    
-    Arc::new(db)
+
+    return db;
 }

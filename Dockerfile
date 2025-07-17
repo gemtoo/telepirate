@@ -1,4 +1,6 @@
 FROM rust:1.88-alpine AS chef
+# Default build profile is dev
+ARG BUILD_PROFILE=dev
 RUN apk add --no-cache \
     build-base \
     pkgconfig \
@@ -16,14 +18,14 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 WORKDIR /app
 COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
+RUN cargo chef cook --profile ${BUILD_PROFILE} --locked --recipe-path recipe.json
 COPY . .
-RUN cargo build --release --bin telepirate
+RUN cargo install --profile ${BUILD_PROFILE} --locked --path .
 
 FROM alpine:edge AS runtime
 RUN apk add --no-cache \
     ffmpeg \
     ca-certificates \
     yt-dlp
-COPY --from=builder /app/target/release/telepirate /usr/bin/
+COPY --from=builder /usr/local/cargo/bin/telepirate /usr/bin/
 ENTRYPOINT [ "telepirate" ]

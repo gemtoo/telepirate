@@ -1,20 +1,12 @@
-use crate::pirate::FileType;
 use std::fs::remove_dir_all;
-use std::io::{stdout, Write};
+use std::io::{Write, stdout};
 use std::path::PathBuf;
 use std::time::Duration;
-use validators::prelude::*;
-use validators::url::Url;
+
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
-#[derive(Validator)]
-#[validator(http_url(local(Allow)))]
-#[allow(dead_code)]
-pub struct HttpURL {
-    url: Url,
-    is_https: bool,
-}
+use crate::pirate::FileType;
 
 pub fn cleanup(absolute_destination_path: PathBuf) {
     trace!(
@@ -61,9 +53,9 @@ pub fn die(reason: impl Into<String>) -> ! {
     std::process::exit(1);
 }
 
-pub fn url_is_valid(url: &str) -> bool {
-    return HttpURL::parse_string(url).is_ok();
-}
+// pub fn url_is_valid(url: &str) -> bool {
+//     return HttpURL::parse_string(url).is_ok();
+// }
 
 pub struct FolderData {
     pub size_in_bytes: usize,

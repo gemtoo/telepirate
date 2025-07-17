@@ -30,10 +30,7 @@ stages:
         echo "$PUB_CI_REGISTRY_PASSWORD" | docker login -u "$PUB_CI_REGISTRY_USER" --password-stdin $PUB_CI_REGISTRY
       fi
   script:
-    - |
-      if ! docker buildx inspect cibuilder; then
-        docker buildx create --use --name cibuilder
-      fi
+    - docker buildx create --use --name cibuilder
     - |
       # Use separate cache tags for dev vs prod.
       if [ "$CI_ENVIRONMENT_NAME" = "prod" ]; then
@@ -41,11 +38,14 @@ stages:
         # Public registry tags and building for arm64 are needed only when going public.
         CONDITIONAL_FLAGS="\
           --platform linux/amd64,linux/arm64 \
+          --build-arg BUILD_PROFILE=release \
           --tag ${PUB_CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_SEMANTIC_TAG} \
           --tag ${PUB_CI_REGISTRY_IMAGE}:latest"
       else
         CACHE_TAG="cache-image-dev"
-        CONDITIONAL_FLAGS="--platform linux/amd64"
+        CONDITIONAL_FLAGS="\
+          --platform linux/amd64\
+          --build-arg BUILD_PROFILE=dev"
       fi
 
       docker buildx build \
@@ -61,8 +61,10 @@ stages:
 .deploy-template: &deploy-template
   stage: deploy
   image: docker:28-cli
+  variables:
+    COMPOSE_HTTP_TIMEOUT: 300
   before_script:
-    - apk add --no-cache openssh-client gettext rsync
+    - apk add --no-cache openssh-client gettext
     - mkdir -p ~/.ssh
     - echo "$SSH_PRIVATE_KEY_BASE64" | base64 -d > ~/.ssh/id_ed25519
     - chmod 600 ~/.ssh/id_ed25519
