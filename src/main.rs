@@ -2,14 +2,15 @@
 extern crate log;
 pub const CRATE_NAME: &str = module_path!();
 pub const FILE_STORAGE: &str = "/tmp/telepirate-downloads";
-mod bot;
 mod database;
-mod tracing;
+mod engine;
 mod misc;
 mod pirate;
+mod task;
+mod tracing;
 
 #[tokio::main]
 async fn main() {
     misc::boot();
-    bot::run().await;
+    engine::run().await;
 }

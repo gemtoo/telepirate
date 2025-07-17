@@ -13,7 +13,7 @@ services:
     stop_grace_period: 0s
 
   surrealdb:
-    image: surrealdb/surrealdb:v2.3.2
+    image: surrealdb/surrealdb:v2.3.7
     command: ["start", "--log", "info", "--user", "root", "--pass", "root", "memory"]
     cap_drop:
       - ALL
