@@ -56,7 +56,8 @@ impl std::fmt::Display for FileType {
     }
 }
 
-pub fn mp3(url: String, download_id: String) -> DownloadsResult {
+#[tracing::instrument(skip_all)]
+pub fn mp3(url: String, task_id: String) -> DownloadsResult {
     let args = vec![
         Arg::new_with_arg("--concurrent-fragments", "100000"),
         Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
@@ -69,11 +70,12 @@ pub fn mp3(url: String, download_id: String) -> DownloadsResult {
         Arg::new_with_arg("--audio-quality", "0"),
     ];
     let filetype = FileType::Mp3;
-    let downloaded = dl(url, args, filetype, download_id)?;
+    let downloaded = download(url, args, filetype, task_id)?;
     Ok(downloaded)
 }
 
-pub fn mp4(url: String, download_id: String) -> DownloadsResult {
+#[tracing::instrument(skip_all)]
+pub fn mp4(url: String, task_id: String) -> DownloadsResult {
     let args = vec![
         Arg::new_with_arg("--concurrent-fragments", "100000"),
         Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
@@ -85,11 +87,12 @@ pub fn mp4(url: String, download_id: String) -> DownloadsResult {
         Arg::new_with_arg("--format", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"),
     ];
     let filetype = FileType::Mp4;
-    let downloaded = dl(url, args, filetype, download_id)?;
+    let downloaded = download(url, args, filetype, task_id)?;
     Ok(downloaded)
 }
 
-pub fn ogg(url: String, download_id: String) -> DownloadsResult {
+#[tracing::instrument(skip_all)]
+pub fn ogg(url: String, task_id: String) -> DownloadsResult {
     let args = vec![
         Arg::new_with_arg("--concurrent-fragments", "100000"),
         Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
@@ -101,18 +104,19 @@ pub fn ogg(url: String, download_id: String) -> DownloadsResult {
         Arg::new_with_arg("--audio-quality", "64K"),
     ];
     let filetype = FileType::Voice;
-    let downloaded = dl(url, args, filetype, download_id)?;
+    let downloaded = download(url, args, filetype, task_id)?;
     Ok(downloaded)
 }
 
-pub fn construct_destination_path(download_id: String) -> String {
-    return format!("{}/{}", FILE_STORAGE, download_id);
+pub fn construct_destination_path(task_id: String) -> String {
+    return format!("{}/{}", FILE_STORAGE, task_id);
 }
 
-fn dl(url: String, args: Vec<Arg>, filetype: FileType, download_id: String) -> DownloadsResult {
-    debug!("Downloading {}(s) from {} ...", filetype.as_str(), url);
+#[tracing::instrument(skip(args))]
+fn download(url: String, args: Vec<Arg>, filetype: FileType, task_id: String) -> DownloadsResult {
+    debug!("Downloading ...");
     // UUID is used to name path so that a second concurrent Tokio task can gather info from that path.
-    let absolute_destination_path = &construct_destination_path(download_id);
+    let absolute_destination_path = &construct_destination_path(task_id);
     let path = PathBuf::from(absolute_destination_path);
     let ytd = YoutubeDL::new(&path, args, &url)?;
     let ytdresult = ytd.download();

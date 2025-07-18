@@ -64,7 +64,7 @@ pub trait DbRecord: Clone + Debug /*+ Display*/ + Serialize + DeserializeOwned +
     ///
     /// Uses the same query construction approach as select_by_task_id
     /// but filters by chat_id instead.
-    #[tracing::instrument(skip(self, db), fields(task_id = %self.task_id()))]
+    #[tracing::instrument(skip(self, db), fields(chat_id = %self.chat_id()))]
     async fn select_by_chat_id(&self, db: Surreal<DbClient>) -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
         let type_name = type_name(self)?;
         trace!("{} ...", type_name);

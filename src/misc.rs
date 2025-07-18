@@ -8,11 +8,9 @@ use walkdir::WalkDir;
 
 use crate::pirate::FileType;
 
+#[tracing::instrument]
 pub fn cleanup(absolute_destination_path: PathBuf) {
-    trace!(
-        "Deleting the working directory {} ...",
-        absolute_destination_path.to_str().unwrap()
-    );
+    trace!("Deleting files ...");
     remove_dir_all(absolute_destination_path).unwrap();
 }
 
@@ -20,11 +18,12 @@ pub fn update() {
     stdout().flush().unwrap();
 }
 
+#[tracing::instrument]
 pub fn boot() {
     use crate::tracing;
     tracing::init();
-    checkdep("yt-dlp");
-    checkdep("ffmpeg");
+    check_dependency("yt-dlp");
+    check_dependency("ffmpeg");
     let _ = ctrlc::set_handler(move || {
         info!("Stopping ...");
         update();
@@ -32,8 +31,9 @@ pub fn boot() {
     });
 }
 
-fn checkdep(dep: &str) {
-    trace!("Checking dependency {} ...", dep);
+#[tracing::instrument(skip_all)]
+fn check_dependency(dep: &str) {
+    trace!("{} ...", dep);
     let result_output = std::process::Command::new(dep).arg("--help").output();
     if let Err(e) = result_output {
         if let std::io::ErrorKind::NotFound = e.kind() {
@@ -106,7 +106,6 @@ impl FolderData {
 
 // Telegram limits message length to 4096 chars. Thus the message is split into sendable chunks.
 pub fn split_text(text: &str) -> Vec<String> {
-    trace!("Splitting text into sendable chunks ...");
     if text.len() > 4096 * 4 {
         let stringvec =
             vec!["Error traceback is too large. Read the logs for more info.".to_string()];

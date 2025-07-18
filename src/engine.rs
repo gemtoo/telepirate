@@ -19,16 +19,16 @@ use crate::{
     task::{HasTaskId, TaskState, TrackedMessage},
 };
 
-/// Supported bot commands for user interaction
+/// Supported commands
 #[derive(BotCommands, Clone, Default)]
 #[command(rename_rule = "lowercase")]
 enum Command {
-    /// Initiate bot interaction and display welcome
+    /// Start the bot
     #[default]
     Start,
-    /// Request content selection menu
+    /// Ask for media
     Ask,
-    /// Remove pending tasks and related messages
+    /// Clear the chat
     Clear,
 }
 
@@ -44,7 +44,7 @@ fn bot_init() -> Bot {
         .build()
         .unwrap_or_else(|error| die(error.to_string()));
 
-    // Custom API URL for Telegram bot interactions
+    // URL of the Dockerized Telegram Bot API
     let api_url = "http://telegram-bot-api:8081"
         .parse()
         .unwrap_or_else(|_| die("Invalid API URL".to_string()));
@@ -67,7 +67,7 @@ pub async fn run() {
     bot.set_my_commands(commands)
         .scope(BotCommandScope::Default)
         .await
-        .expect("Failed to configure bot commands");
+        .unwrap_or_else(|_| die("Failed to set bot commands.".to_string()));
 
     // Start event dispatcher
     dispatcher(bot, db).await;
@@ -110,14 +110,11 @@ async fn callback_handler(
     db: Surreal<DbClient>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     debug!("Processing callback query...");
-    let message = callback_query
-        .regular_message()
-        .expect("Callback missing message");
+    let message = callback_query.regular_message().unwrap();
 
     // Retrieve task states for current chat
-    let task_states_from_db = TaskState::select_from_db_by_chat_id(message.chat.id, db.clone())
-        .await
-        .expect("Database query failed");
+    let task_states_from_db =
+        TaskState::select_from_db_by_chat_id(message.chat.id, db.clone()).await?;
 
     // Filter for 'New' state tasks
     let states_new: Vec<TaskState> = task_states_from_db
@@ -156,12 +153,10 @@ async fn callback_handler(
     // Update database state
     task_state_that_is_waiting_for_url
         .delete_by_task_id(db.clone())
-        .await
-        .expect("Failed to delete task state");
+        .await?;
     task_state_that_is_waiting_for_url
         .intodb(db.clone())
-        .await
-        .expect("Failed to insert task state");
+        .await?;
 
     // Update message with next instructions
     if let Err(e) = bot.edit_message_text(chat_id, message.id, &text).await {
@@ -185,22 +180,16 @@ async fn message_handler(
     if let Some(text) = msg_from_user.text() {
         match BotCommands::parse(text, me.username()) {
             Ok(Command::Clear) => {
-                // Initialize task tracking
-                let task_state = TaskState::try_from(&msg_from_user).expect("Invalid message");
-                task_state
-                    .intodb(db.clone())
-                    .await
-                    .expect("Database insert failed");
+                // Initialize new task session
+                let task_state = TaskState::try_from(&msg_from_user)?;
+                task_state.intodb(db.clone()).await?;
                 let task_session = task_state.session();
                 task_session
                     .remember_related_message(&msg_from_user, db.clone())
-                    .await
-                    .expect("Message tracking failed");
+                    .await?;
 
                 // Retrieve clearable tasks (New/WaitingForUrl states)
-                let task_states = TaskState::select_from_db_by_chat_id(chat_id, db.clone())
-                    .await
-                    .expect("Database query failed");
+                let task_states = TaskState::select_from_db_by_chat_id(chat_id, db.clone()).await?;
                 let clearable_tasks: Vec<TaskState> = task_states
                     .into_iter()
                     .filter(|s| matches!(s, TaskState::New(_) | TaskState::WaitingForUrl(_)))
@@ -211,48 +200,44 @@ async fn message_handler(
                     let task_id = task.task_id();
 
                     // Delete tracked messages
-                    let messages = TrackedMessage::from_db_by_task_id(task_id, db.clone())
-                        .await
-                        .expect("Message query failed");
+                    let messages = TrackedMessage::from_db_by_task_id(task_id, db.clone()).await?;
                     for msg in messages {
-                        msg.delete_by_task_id(db.clone())
-                            .await
-                            .expect("Message deletion failed");
+                        msg.delete_by_task_id(db.clone()).await?;
                         bot.delete_message(chat_id, msg.message_id).await.ok();
                     }
 
                     // Delete task state
-                    task.delete_by_task_id(db.clone())
-                        .await
-                        .expect("State deletion failed");
+                    task.delete_by_task_id(db.clone()).await?;
                 }
                 return Ok(());
             }
             Ok(Command::Start) | Ok(Command::Ask) => {
                 // Initialize new task session
-                let task_state = TaskState::try_from(&msg_from_user).expect("Invalid message");
-                task_state
-                    .intodb(db.clone())
-                    .await
-                    .expect("Database insert failed");
+                let task_state = TaskState::try_from(&msg_from_user)?;
+                task_state.intodb(db.clone()).await?;
                 let task_session = task_state.session();
                 task_session
                     .remember_related_message(&msg_from_user, db.clone())
-                    .await
-                    .expect("Message tracking failed");
+                    .await?;
 
                 // Present media type selection
                 let keyboard = make_keyboard();
                 let text = "Select content type:";
-                if let Err(e) = task_session
+                task_session
                     .send_and_remember_msg_with_keyboard(text, keyboard, bot.clone(), db.clone())
-                    .await
-                {
-                    error!("Keyboard send failed: {}", e);
-                }
+                    .await?;
                 return Ok(());
             }
-            Err(_) => { /* Non-command text handled below */ }
+            Err(_) => {
+                // Err represents an unknown command, it can be any message from user, in this case just track it
+                // Initialize new task session
+                let task_state = TaskState::try_from(&msg_from_user)?;
+                task_state.intodb(db.clone()).await?;
+                let task_session = task_state.session();
+                task_session
+                    .remember_related_message(&msg_from_user, db.clone())
+                    .await?;
+            }
         }
     }
 
@@ -268,7 +253,6 @@ async fn message_handler(
     match waiting_states.len() {
         0 => {} // No URL expected
         1.. => {
-            warn!("Multiple waiting states detected");
             let task_state = waiting_states[0].clone();
             let task_session = task_state.session();
 
@@ -293,7 +277,6 @@ async fn message_handler(
                                 db.clone(),
                             )
                             .await?;
-
                         // Mark task as successful
                         let final_state = running_state.clone().to_success();
                         running_state.delete_by_task_id(db.clone()).await.ok();

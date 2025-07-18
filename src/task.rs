@@ -10,7 +10,7 @@ use teloxide::prelude::*;
 use teloxide::types::MessageId;
 use teloxide::types::{InlineKeyboardMarkup, InputFile};
 use tokio::sync::watch;
-use tracing::{debug, error, trace, warn};
+use tracing::{Instrument, debug, error, trace, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -33,13 +33,13 @@ pub enum TaskState {
 }
 // add so that /clear deletes all new/waitingforurl tasks from the dadabaze
 impl DbRecord for TaskState {
-    #[tracing::instrument(skip(db), fields(task_id = %self.task_id()))]
+    #[tracing::instrument(skip(self, db), fields(chat_id = %self.chat_id()))]
     async fn select_by_chat_id(
         &self,
         db: Surreal<DbClient>,
     ) -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
         let type_name = type_name(self).unwrap();
-        debug!("In DB searching all {}s by ChatId ...", type_name);
+        trace!("{} ...", type_name);
         // query_base because type_name can't be in .bind() because .bind() adds single brackets '' thus searching in the wrong table
         // the only thing that's changed from the default trait function is that data.chat_id is used instead of simply chat_id
         let query_base = format!(
@@ -59,7 +59,7 @@ impl DbRecord for TaskState {
         db: Surreal<DbClient>,
     ) -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
         let type_name = type_name(self).unwrap();
-        debug!("In DB deleting all {}s by TaskId ...", type_name);
+        trace!("{} ...", type_name);
         // query_base because type_name can't be in .bind() because .bind() adds single brackets '' thus searching in the wrong table
         // the only thing that's changed from the default trait function is that data.task_id is used instead of simply task_id
         let query_base = format!(
@@ -97,7 +97,6 @@ impl HasChatId for TaskState {
     }
 }
 impl TaskState {
-    #[tracing::instrument(skip(msg_from_user))]
     pub fn try_from(msg_from_user: &Message) -> Result<Self, String> {
         Ok(Self::New(TaskSession::try_from(msg_from_user)?))
     }
@@ -205,9 +204,7 @@ pub struct TrackedMessage {
 }
 
 impl TrackedMessage {
-    #[tracing::instrument(skip(message))]
     pub fn try_from(task_id: TaskId, message: &Message) -> Result<Self, String> {
-        trace!("...");
         Ok(Self {
             task_id,
             message_id: message.id,
@@ -225,6 +222,72 @@ impl TrackedMessage {
             chat_id: ChatId(0),
         };
         dummy.select_by_task_id(db).await.map_err(|e| e.into())
+    }
+    #[tracing::instrument(skip(self, rx, filetype, bot))]
+    pub async fn directory_size_poller_and_mesage_updater(
+        &self,
+        rx: watch::Receiver<bool>,
+        filetype: FileType,
+        bot: Bot,
+    ) -> Result<tokio::task::JoinHandle<()>, Box<dyn Error + Send + Sync>> {
+        debug!("Starting poller task ...");
+
+        let path_to_downloads = pirate::construct_destination_path(self.task_id().to_string());
+        if let Err(e) = std::fs::create_dir_all(&path_to_downloads) {
+            return Err(format!("Failed to create directory: {}", e).into());
+        }
+        let owned_tracked_message = self.clone();
+        let poller_span = tracing::info_span!(
+            "directory_size_poller_task",
+            task_id = ?self.task_id(),
+        );
+
+        let handle = tokio::task::spawn(
+            {
+                async move {
+                    let mut previous_update_text = String::new();
+
+                    while !*rx.borrow() {
+                        sleep(5).await;
+                        trace!("Polling data ...");
+
+                        let folder_data = FolderData::from(&path_to_downloads, filetype.clone());
+
+                        trace!(
+                            "File count: {}. Size: {}.",
+                            folder_data.file_count,
+                            folder_data.format_bytes_to_megabytes()
+                        );
+
+                        let update_text = format!(
+                            "Downloading... Please wait.\nFiles to send: {}.\nTotal size: {}.",
+                            folder_data.file_count,
+                            folder_data.format_bytes_to_megabytes(),
+                        );
+
+                        if update_text != previous_update_text {
+                            previous_update_text = update_text.clone();
+
+                            if let Err(e) = bot
+                                .clone()
+                                .edit_message_text(
+                                    owned_tracked_message.chat_id(),
+                                    owned_tracked_message.message_id,
+                                    &update_text,
+                                )
+                                .await
+                            {
+                                warn!("Failed to update message: {}", e);
+                            }
+                        }
+                    }
+                    trace!("Poller task done.");
+                }
+            }
+            .instrument(poller_span),
+        );
+
+        Ok(handle)
     }
 }
 
@@ -276,7 +339,7 @@ impl TaskSession {
         self.media_type = Some(media_type);
     }
 
-    #[tracing::instrument(skip(self, db), fields(task_id = %self.task_id()))]
+    #[tracing::instrument(skip(self, db, bot), fields(task_id = %self.task_id()))]
     pub async fn send_and_remember_msg(
         &self,
         text: &str,
@@ -310,7 +373,7 @@ impl TaskSession {
         Ok(tracked_messages)
     }
 
-    #[tracing::instrument(skip(self, db, bot, keyboard), fields(task_id = %self.task_id()))]
+    #[tracing::instrument(skip(self, db, bot, keyboard))]
     pub async fn send_and_remember_msg_with_keyboard(
         &self,
         text: &str,
@@ -338,7 +401,7 @@ impl TaskSession {
             }
         }
     }
-    #[tracing::instrument(skip_all, fields(task_id = %self.task_id()))]
+    #[tracing::instrument(skip_all)]
     pub async fn remember_related_message(
         &self,
         msg: &Message,
@@ -380,33 +443,32 @@ impl TaskSession {
             .send_and_remember_msg("Downloading... Please wait.", bot.clone(), db.clone())
             .await?;
 
-        let last_message_id = tracked_messages
-            .first()
-            .map(|msg| msg.message_id)
-            .ok_or("No messages were sent")?;
+        let last_message = tracked_messages[0].clone();
 
-        let download_id = self.task_id().to_string();
         let (tx, rx) = watch::channel(false);
 
-        let poller_handle = run_directory_size_poller_and_mesage_updater(
-            rx,
-            self.chat_id,
-            last_message_id,
-            download_id.clone(),
-            filetype.clone(),
-            bot.clone(),
-        )
-        .await?;
+        let poller_handle = last_message
+            .directory_size_poller_and_mesage_updater(rx, filetype.clone(), bot.clone())
+            .await?;
 
         let downloads_result = match &filetype {
             FileType::Mp3 => {
-                tokio::task::spawn_blocking(move || pirate::mp3(url, download_id)).await
+                tokio::task::spawn_blocking(move || {
+                    pirate::mp3(url, last_message.task_id().to_string())
+                })
+                .await
             }
             FileType::Mp4 => {
-                tokio::task::spawn_blocking(move || pirate::mp4(url, download_id)).await
+                tokio::task::spawn_blocking(move || {
+                    pirate::mp4(url, last_message.task_id().to_string())
+                })
+                .await
             }
             FileType::Voice => {
-                tokio::task::spawn_blocking(move || pirate::ogg(url, download_id)).await
+                tokio::task::spawn_blocking(move || {
+                    pirate::ogg(url, last_message.task_id().to_string())
+                })
+                .await
             }
         }?;
 
@@ -438,12 +500,9 @@ impl TaskSession {
                 self.delete_messages_by_task_id(bot.clone(), db.clone())
                     .await?;
                 cleanup(files.folder);
+                info!("Success!");
                 Ok(())
-            } //     Ok(data) => data,
-              //     Err(e) => {
-              //         warn!("Error getting folder data: {}", e);
-              //     }
-              // }
+            }
         }
     }
     #[tracing::instrument(skip_all, fields(task_id = %self.task_id()))]
@@ -467,7 +526,7 @@ impl TaskSession {
 
             match result {
                 Ok(_) => {
-                    trace!("File '{}' sent successfully", filename_display);
+                    info!("File '{}' sent successfully.", filename_display);
                     return Ok(());
                 }
                 Err(error) => {
@@ -492,64 +551,4 @@ impl TaskSession {
         )
         .into())
     }
-}
-
-#[tracing::instrument(skip(rx, last_message_id, filetype, bot))]
-async fn run_directory_size_poller_and_mesage_updater(
-    rx: watch::Receiver<bool>,
-    chat_id: ChatId,
-    last_message_id: MessageId,
-    download_id: String,
-    filetype: FileType,
-    bot: Bot,
-) -> Result<tokio::task::JoinHandle<()>, Box<dyn Error + Send + Sync>> {
-    debug!(
-        "Starting poller task for Chat ID {}, Download ID {} ...",
-        chat_id, &download_id
-    );
-
-    let path_to_downloads = pirate::construct_destination_path(download_id.clone());
-    if let Err(e) = std::fs::create_dir_all(&path_to_downloads) {
-        return Err(format!("Failed to create directory: {}", e).into());
-    }
-
-    let handle = tokio::task::spawn({
-        async move {
-            let mut previous_update_text = String::new();
-
-            while !*rx.borrow() {
-                sleep(5).await;
-                trace!("Polling data about Download ID {} ...", download_id);
-
-                let folder_data = FolderData::from(&path_to_downloads, filetype.clone());
-
-                trace!(
-                    "Download ID {}. File count: {}. Size: {}.",
-                    &download_id,
-                    folder_data.file_count,
-                    folder_data.format_bytes_to_megabytes()
-                );
-
-                let update_text = format!(
-                    "Downloading... Please wait.\nFiles to send: {}.\nTotal size: {}.",
-                    folder_data.file_count,
-                    folder_data.format_bytes_to_megabytes(),
-                );
-
-                if update_text != previous_update_text {
-                    previous_update_text = update_text.clone();
-
-                    if let Err(e) = bot
-                        .edit_message_text(chat_id, last_message_id, &update_text)
-                        .await
-                    {
-                        warn!("Failed to update message: {}", e);
-                    }
-                }
-            }
-            trace!("Poller task for Download ID {} done.", &download_id);
-        }
-    });
-
-    Ok(handle)
 }
