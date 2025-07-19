@@ -19,7 +19,7 @@ pub struct Downloads {
     pub folder: PathBuf,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize)]
 #[serde(tag = "filetype")]
 pub enum FileType {
     #[default]
@@ -30,11 +30,11 @@ pub enum FileType {
 
 impl FileType {
     pub fn as_str<'a>(&self) -> &'a str {
-        return match self {
+        match self {
             FileType::Mp3 => "mp3",
             FileType::Mp4 => "mp4",
             FileType::Voice => "opus",
-        };
+        }
     }
     pub fn from_callback_data(data: &str) -> Option<Self> {
         match data {
@@ -109,7 +109,7 @@ pub fn ogg(url: String, task_id: String) -> DownloadsResult {
 }
 
 pub fn construct_destination_path(task_id: String) -> String {
-    return format!("{}/{}", FILE_STORAGE, task_id);
+    format!("{FILE_STORAGE}/{task_id}")
 }
 
 #[tracing::instrument(skip(args))]
@@ -123,34 +123,30 @@ fn download(url: String, args: Vec<Arg>, filetype: FileType, task_id: String) ->
     let mut paths: Vec<PathBuf> = Vec::new();
     let regex = Regex::new(r"(.*)(\.opus)").unwrap();
     let fileformat = filetype.as_str();
-    let filepaths = glob(&format!("{}/*{}", absolute_destination_path, fileformat))?;
+    let filepaths = glob(&format!("{absolute_destination_path}/*{fileformat}"))?;
     for entry in filepaths {
-        match entry {
-            Ok(mut file_path) => {
-                let filename = file_path.to_str().unwrap();
-                // Local Telegram API allows bots sending only files under 2 GB.
-                let filesize = file_path.metadata()?.len();
-                if filesize < 2_000_000_000 {
-                    // Rename .opus into .ogg because Telegram requires so to display wave pattern.
-                    if let Some(captures) = regex.captures(filename) {
-                        let oldname = captures.get(0).unwrap().as_str();
-                        let timestamp = timestamp(SystemTime::now())
-                            .to_string()
-                            .replace(":", "-")
-                            .replace("T", "_")
-                            .replace("Z", "");
-                        // Filename formatting that is used by Telegram when sending voice messages.
-                        let newname =
-                            format!("{}/audio_{}.ogg", absolute_destination_path, timestamp);
-                        std::fs::rename(oldname, &newname)?;
-                        file_path = PathBuf::from(newname);
-                    }
-                    paths.push(file_path);
-                } else {
-                    trace!("Skipping large file {}", filename);
+        if let Ok(mut file_path) = entry {
+            let filename = file_path.to_str().unwrap();
+            // Local Telegram API allows bots sending only files under 2 GB.
+            let filesize = file_path.metadata()?.len();
+            if filesize < 2_000_000_000 {
+                // Rename .opus into .ogg because Telegram requires so to display wave pattern.
+                if let Some(captures) = regex.captures(filename) {
+                    let oldname = captures.get(0).unwrap().as_str();
+                    let timestamp = timestamp(SystemTime::now())
+                        .to_string()
+                        .replace(":", "-")
+                        .replace("T", "_")
+                        .replace("Z", "");
+                    // Filename formatting that is used by Telegram when sending voice messages.
+                    let newname = format!("{absolute_destination_path}/audio_{timestamp}.ogg");
+                    std::fs::rename(oldname, &newname)?;
+                    file_path = PathBuf::from(newname);
                 }
+                paths.push(file_path);
+            } else {
+                trace!("Skipping large file {filename}");
             }
-            _ => {}
         }
     }
     let file_amount = paths.len();
@@ -160,10 +156,7 @@ fn download(url: String, args: Vec<Arg>, filetype: FileType, task_id: String) ->
         let error_text;
         match ytdresult {
             Ok(traceback) => {
-                error_text = format!(
-                    "{:?}\n\nFiles larger than 2GB are not supported.",
-                    traceback
-                );
+                error_text = format!("{traceback:?}\n\nFiles larger than 2GB are not supported.");
             }
             Err(e) => {
                 error_text = e.to_string();
