@@ -1,4 +1,3 @@
-use tracing_subscriber;
 use tracing_subscriber::EnvFilter;
 
 pub fn init() {
@@ -9,5 +8,5 @@ pub fn init() {
         .with_target(false)
         .init();
     let version = env!("CARGO_PKG_VERSION");
-    info!("Started up. Version: {}", version);
+    info!("Started up. Version: {version}");
 }

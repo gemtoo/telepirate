@@ -42,10 +42,7 @@ impl DbRecord for TaskState {
         trace!("{} ...", type_name);
         // query_base because type_name can't be in .bind() because .bind() adds single brackets '' thus searching in the wrong table
         // the only thing that's changed from the default trait function is that data.chat_id is used instead of simply chat_id
-        let query_base = format!(
-            "SELECT * FROM {} WHERE data.chat_id = $chat_id_object",
-            type_name
-        );
+        let query_base = format!("SELECT * FROM {type_name} WHERE data.chat_id = $chat_id_object");
         let object_array: Vec<Self> = db
             .query(&query_base)
             .bind(("chat_id_object", self.chat_id()))
@@ -62,10 +59,7 @@ impl DbRecord for TaskState {
         trace!("{} ...", type_name);
         // query_base because type_name can't be in .bind() because .bind() adds single brackets '' thus searching in the wrong table
         // the only thing that's changed from the default trait function is that data.task_id is used instead of simply task_id
-        let query_base = format!(
-            "DELETE FROM {} WHERE data.task_id = $task_id_object",
-            type_name
-        );
+        let query_base = format!("DELETE FROM {type_name} WHERE data.task_id = $task_id_object");
         let object_array: Vec<Self> = db
             .query(&query_base)
             .bind(("task_id_object", self.task_id()))
@@ -177,7 +171,7 @@ pub trait HasChatId {
     fn chat_id(&self) -> ChatId;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct TaskId {
     pub uuid: Uuid,
 }
@@ -196,7 +190,7 @@ impl fmt::Display for TaskId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackedMessage {
     task_id: TaskId,
     pub message_id: MessageId,
@@ -221,7 +215,7 @@ impl TrackedMessage {
             message_id: MessageId(0),
             chat_id: ChatId(0),
         };
-        dummy.select_by_task_id(db).await.map_err(|e| e.into())
+        dummy.select_by_task_id(db).await
     }
     #[tracing::instrument(skip(self, rx, filetype, bot))]
     pub async fn directory_size_poller_and_mesage_updater(
@@ -234,7 +228,7 @@ impl TrackedMessage {
 
         let path_to_downloads = pirate::construct_destination_path(self.task_id().to_string());
         if let Err(e) = std::fs::create_dir_all(&path_to_downloads) {
-            return Err(format!("Failed to create directory: {}", e).into());
+            return Err(format!("Failed to create directory: {e}").into());
         }
         let owned_tracked_message = self.clone();
         let poller_span = tracing::info_span!(
@@ -251,7 +245,7 @@ impl TrackedMessage {
                         sleep(5).await;
                         trace!("Polling data ...");
 
-                        let folder_data = FolderData::from(&path_to_downloads, filetype.clone());
+                        let folder_data = FolderData::from(&path_to_downloads, filetype);
 
                         trace!(
                             "File count: {}. Size: {}.",
@@ -448,7 +442,7 @@ impl TaskSession {
         let (tx, rx) = watch::channel(false);
 
         let poller_handle = last_message
-            .directory_size_poller_and_mesage_updater(rx, filetype.clone(), bot.clone())
+            .directory_size_poller_and_mesage_updater(rx, filetype, bot.clone())
             .await?;
 
         let downloads_result = match &filetype {
@@ -477,7 +471,7 @@ impl TaskSession {
                 warn!("Download failed: {}", error);
                 self.send_and_remember_msg(&error.to_string(), bot.clone(), db)
                     .await?;
-                Err(error.into())
+                Err(error)
             }
             Ok(files) => {
                 trace!(
@@ -526,14 +520,13 @@ impl TaskSession {
 
             match result {
                 Ok(_) => {
-                    info!("File '{}' sent successfully.", filename_display);
+                    info!("File '{filename_display}' sent successfully.");
                     return Ok(());
                 }
                 Err(error) => {
                     sleep(10).await;
                     let error_text = format!(
-                        "Attempt {}/{} at sending '{}' failed: {}",
-                        attempt, max_retries, filename_display, error
+                        "Attempt {attempt}/{max_retries} at sending '{filename_display}' failed: {error}"
                     );
                     warn!("{}", error_text);
 
@@ -545,10 +538,6 @@ impl TaskSession {
             }
         }
 
-        Err(format!(
-            "Failed to send file after {} attempts: {}",
-            max_retries, filename_display
-        )
-        .into())
+        Err(format!("Failed to send file after {max_retries} attempts: {filename_display}").into())
     }
 }

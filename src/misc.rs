@@ -35,11 +35,11 @@ pub fn boot() {
 fn check_dependency(dep: &str) {
     trace!("{} ...", dep);
     let result_output = std::process::Command::new(dep).arg("--help").output();
-    if let Err(e) = result_output {
-        if let std::io::ErrorKind::NotFound = e.kind() {
-            error!("{} is not found. Please install {} first.", dep, dep);
-            std::process::exit(1);
-        }
+    if let Err(e) = result_output
+        && let std::io::ErrorKind::NotFound = e.kind()
+    {
+        error!("{dep} is not found. Please install {dep} first.");
+        std::process::exit(1);
     }
 }
 
@@ -52,11 +52,6 @@ pub fn die(reason: impl Into<String>) -> ! {
     error!("{}", reason.into());
     std::process::exit(1);
 }
-
-// pub fn url_is_valid(url: &str) -> bool {
-//     return HttpURL::parse_string(url).is_ok();
-// }
-
 pub struct FolderData {
     pub size_in_bytes: usize,
     pub file_count: usize,
@@ -119,5 +114,5 @@ pub fn split_text(text: &str) -> Vec<String> {
         return stringvec;
     }
     let stringvec = vec![text.to_string()];
-    return stringvec;
+    stringvec
 }

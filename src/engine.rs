@@ -35,7 +35,7 @@ enum Command {
 /// Initializes and configures the Telegram bot instance
 #[tracing::instrument]
 fn bot_init() -> Bot {
-    debug!("Initializing bot client...");
+    debug!("Initializing bot client ...");
     let bot_token = std::env::var("TELOXIDE_TOKEN").unwrap_or_else(|e| die(e.to_string()));
 
     // Configure HTTP client with extended timeout for file operations
@@ -47,11 +47,11 @@ fn bot_init() -> Bot {
     // URL of the Dockerized Telegram Bot API
     let api_url = "http://telegram-bot-api:8081"
         .parse()
-        .unwrap_or_else(|_| die("Invalid API URL".to_string()));
+        .unwrap_or_else(|_| die("Invalid API URL.".to_string()));
 
     let bot = Bot::with_client(bot_token, client).set_api_url(api_url);
 
-    info!("Bot client initialized successfully");
+    info!("Bot client initialized successfully.");
     bot
 }
 
@@ -142,7 +142,7 @@ async fn callback_handler(
     bot.answer_callback_query(callback_query.id.clone()).await?;
 
     let chat_id = message.chat.id;
-    let text = format!("Selected {}. Please send the content URL.", media_type);
+    let text = format!("Selected {media_type}. Please send the content URL.");
 
     // Transition task state from New to WaitingForUrl
     let mut task_state_that_is_new = states_new[0].clone();
@@ -192,7 +192,7 @@ async fn message_handler(
                 let task_states = TaskState::select_from_db_by_chat_id(chat_id, db.clone()).await?;
                 let clearable_tasks: Vec<TaskState> = task_states
                     .into_iter()
-                    .filter(|s| matches!(s, TaskState::New(_) | TaskState::WaitingForUrl(_)))
+                    .filter(|s| matches!(s, TaskState::New(_) | TaskState::WaitingForUrl(_) | TaskState::Failure(_)))
                     .collect();
 
                 // Purge task-related messages and data
@@ -269,21 +269,32 @@ async fn message_handler(
                         let running_state = task_state.clone().to_running();
                         task_state.delete_by_task_id(db.clone()).await.ok();
                         running_state.intodb(db.clone()).await.ok();
-                        task_session
+                        let request_processing_result = task_session
                             .process_request(
                                 url.to_string(),
-                                task_session.media_type.clone().unwrap(),
+                                task_session.media_type.unwrap(),
                                 bot.clone(),
                                 db.clone(),
                             )
-                            .await?;
-                        // Mark task as successful
-                        let final_state = running_state.clone().to_success();
-                        running_state.delete_by_task_id(db.clone()).await.ok();
-                        final_state.intodb(db.clone()).await.ok();
+                            .await;
+                        match request_processing_result {
+                            Ok(_) => {
+                                // Mark task as successful
+                                let final_state = running_state.clone().to_success();
+                                running_state.delete_by_task_id(db.clone()).await.ok();
+                                final_state.intodb(db.clone()).await.ok();
+                            }
+                            Err(e) => {
+                                // Mark task as failed
+                                warn!("{}", e);
+                                let final_state = running_state.clone().to_failure();
+                                running_state.delete_by_task_id(db.clone()).await.ok();
+                                final_state.intodb(db.clone()).await.ok();
+                            }
+                        }
                     }
                     Err(e) => {
-                        let text = format!("Invalid URL: {}. Please try again", e);
+                        let text = format!("Invalid URL: {e}. Please try again");
                         task_session
                             .send_and_remember_msg(&text, bot.clone(), db.clone())
                             .await?;

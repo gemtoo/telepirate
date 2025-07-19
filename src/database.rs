@@ -52,7 +52,7 @@ pub trait DbRecord: Clone + Debug /*+ Display*/ + Serialize + DeserializeOwned +
 
         // Manual query formatting required because SurrealDB's .bind() method
         // would wrap the type name in quotes, making it invalid as a table identifier
-        let query_base = format!("SELECT * FROM {} WHERE task_id = $task_id_object", type_name);
+        let query_base = format!("SELECT * FROM {type_name} WHERE task_id = $task_id_object");
 
         // Execute parameterized query
         let object_array: Vec<Self> = db.query(&query_base)
@@ -70,7 +70,7 @@ pub trait DbRecord: Clone + Debug /*+ Display*/ + Serialize + DeserializeOwned +
         trace!("{} ...", type_name);
 
         // See note in select_by_task_id about manual query formatting
-        let query_base = format!("SELECT * FROM {} WHERE chat_id = $chat_id_object", type_name);
+        let query_base = format!("SELECT * FROM {type_name} WHERE chat_id = $chat_id_object");
 
         let object_array: Vec<Self> = db.query(&query_base)
              .bind(("chat_id_object", self.chat_id())).await?.take(0)?;
@@ -86,7 +86,7 @@ pub trait DbRecord: Clone + Debug /*+ Display*/ + Serialize + DeserializeOwned +
         trace!("{} ...", type_name);
 
         // Manual DELETE query with task_id parameter
-        let query_base = format!("DELETE FROM {} WHERE task_id = $task_id_object", type_name);
+        let query_base = format!("DELETE FROM {type_name} WHERE task_id = $task_id_object");
 
         let object_array: Vec<Self> = db.query(&query_base)
              .bind(("task_id_object", self.task_id())).await?.take(0)?;
