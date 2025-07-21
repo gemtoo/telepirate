@@ -1,6 +1,6 @@
 [package]
 name = "telepirate"
-version = "1.7.2"
+version = "1.7.3"
 edition = "2024"
 
 [profile.dev]
@@ -10,10 +10,17 @@ codegen-units = 256
 
 [profile.release]
 strip = true
-opt-level = 3
-lto = "fat"
-codegen-units = 1
-panic = "abort"
+opt-level = 0
+codegen-units = 256
+
+# These optimisations add hours to build time
+# binary optimisations are not a bottleneck of this program, this is why turned off
+# [profile.release]
+# strip = true
+# opt-level = 3
+# lto = "fat"
+# codegen-units = 1
+# panic = "abort"
 
 [dependencies]
 ctrlc = { version = "3.4.7", features = ["termination"], default-features = false }
@@ -27,8 +34,8 @@ serde_type_name = { version = "0.2.0", default-features = false }
 surrealdb = { version = "2.3.7", default-features = false, features = ["protocol-ws"] }
 teloxide = { version = "0.17.0", default-features = false, features = ["webhooks-axum", "macros"] }
 tokio = { version = "1.46.1", default-features = false, features = ["rt-multi-thread", "macros"] }
-tracing = { version = "0.1.41", default-features = false }
-tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"], default-features = false }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
 url = { version = "2.5.4", default-features = false }
 uuid = { version = "1.17.0", default-features = false, features = ["serde", "v4"] }
 walkdir = { version = "2.5.0", default-features = false }
