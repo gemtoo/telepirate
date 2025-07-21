@@ -6,7 +6,7 @@ use std::time::Duration;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
-use crate::pirate::FileType;
+use crate::pirate::MediaType;
 
 #[tracing::instrument]
 pub fn cleanup(absolute_destination_path: PathBuf) {
@@ -59,7 +59,7 @@ pub struct FolderData {
 
 impl FolderData {
     // This function counts files and their respective size.
-    pub fn from(path_to_directory: &str, extension: FileType) -> Self {
+    pub fn from(path_to_directory: &str, extension: MediaType) -> Self {
         let extension_str = extension.as_str();
         // Collect all files of a certain extension.
         let files: Vec<DirEntry>;

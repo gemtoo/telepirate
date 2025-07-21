@@ -8,5 +8,5 @@ pub fn init() {
         .with_target(false)
         .init();
     let version = env!("CARGO_PKG_VERSION");
-    info!("Started up. Version: {version}");
+    info!("Version: {version} started up.");
 }

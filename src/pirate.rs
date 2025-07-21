@@ -21,37 +21,37 @@ pub struct Downloads {
 
 #[derive(Default, Debug, Copy, Clone, Serialize, Deserialize)]
 #[serde(tag = "filetype")]
-pub enum FileType {
+pub enum MediaType {
     #[default]
     Mp3,
     Mp4,
     Voice,
 }
 
-impl FileType {
+impl MediaType {
     pub fn as_str<'a>(&self) -> &'a str {
         match self {
-            FileType::Mp3 => "mp3",
-            FileType::Mp4 => "mp4",
-            FileType::Voice => "opus",
+            MediaType::Mp3 => "mp3",
+            MediaType::Mp4 => "mp4",
+            MediaType::Voice => "opus",
         }
     }
     pub fn from_callback_data(data: &str) -> Option<Self> {
         match data {
-            "Audio" => Some(FileType::Mp3),
-            "Video" => Some(FileType::Mp4),
-            "Audio as voice message" => Some(FileType::Voice),
+            "Audio" => Some(MediaType::Mp3),
+            "Video" => Some(MediaType::Mp4),
+            "Audio as voice message" => Some(MediaType::Voice),
             _ => None,
         }
     }
 }
 
-impl std::fmt::Display for FileType {
+impl std::fmt::Display for MediaType {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            FileType::Mp3 => write!(f, "audio"),
-            FileType::Mp4 => write!(f, "video"),
-            FileType::Voice => write!(f, "voice message"),
+            MediaType::Mp3 => write!(f, "audio"),
+            MediaType::Mp4 => write!(f, "video"),
+            MediaType::Voice => write!(f, "voice message"),
         }
     }
 }
@@ -69,7 +69,7 @@ pub fn mp3(url: String, task_id: String) -> DownloadsResult {
         Arg::new_with_arg("--audio-format", "mp3"),
         Arg::new_with_arg("--audio-quality", "0"),
     ];
-    let filetype = FileType::Mp3;
+    let filetype = MediaType::Mp3;
     let downloaded = download(url, args, filetype, task_id)?;
     Ok(downloaded)
 }
@@ -86,7 +86,7 @@ pub fn mp4(url: String, task_id: String) -> DownloadsResult {
         Arg::new("--no-embed-metadata"),
         Arg::new_with_arg("--format", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"),
     ];
-    let filetype = FileType::Mp4;
+    let filetype = MediaType::Mp4;
     let downloaded = download(url, args, filetype, task_id)?;
     Ok(downloaded)
 }
@@ -103,7 +103,7 @@ pub fn ogg(url: String, task_id: String) -> DownloadsResult {
         Arg::new_with_arg("--audio-format", "opus"),
         Arg::new_with_arg("--audio-quality", "64K"),
     ];
-    let filetype = FileType::Voice;
+    let filetype = MediaType::Voice;
     let downloaded = download(url, args, filetype, task_id)?;
     Ok(downloaded)
 }
@@ -113,10 +113,13 @@ pub fn construct_destination_path(task_id: String) -> String {
 }
 
 #[tracing::instrument(skip(args))]
-fn download(url: String, args: Vec<Arg>, filetype: FileType, task_id: String) -> DownloadsResult {
+fn download(url: String, args: Vec<Arg>, filetype: MediaType, task_id: String) -> DownloadsResult {
     debug!("Downloading ...");
     // UUID is used to name path so that a second concurrent Tokio task can gather info from that path.
     let absolute_destination_path = &construct_destination_path(task_id);
+    // Cleanup here is needed in case the task was respawned after interruption.
+    // We need to start from 0 because existing artifacts result in corrupted downloads.
+    cleanup(absolute_destination_path.into());
     let path = PathBuf::from(absolute_destination_path);
     let ytd = YoutubeDL::new(&path, args, &url)?;
     let ytdresult = ytd.download();

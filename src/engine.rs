@@ -9,15 +9,18 @@ use teloxide::{
     types::{InlineKeyboardButton, InlineKeyboardMarkup, Me},
     utils::command::BotCommands,
 };
-use tracing::{debug, error, info, warn}; // Added warn for completeness
+use tracing::{Instrument, debug, error, info, warn}; // Added warn for completeness
 use url::Url;
 
 use crate::{
     database::{self, DbRecord},
     misc::die,
-    pirate::FileType,
-    task::{HasTaskId, TaskState, TrackedMessage},
+    pirate::MediaType,
+    task::{HasTaskId, Task, TaskState},
+    trackedmessage::TrackedMessage,
 };
+
+type HandlerResult = Result<(), Box<dyn Error + Send + Sync>>;
 
 /// Supported commands
 #[derive(BotCommands, Clone, Default)]
@@ -68,7 +71,13 @@ pub async fn run() {
         .scope(BotCommandScope::Default)
         .await
         .unwrap_or_else(|_| die("Failed to set bot commands.".to_string()));
-
+    // let bot_clone = bot.clone();
+    // let db_clone = db.clone();
+    // tokio::task::spawn(async move {
+    //     finalize_interrupted_tasks(bot_clone, db_clone)
+    //         .await
+    //         .unwrap();
+    // });
     // Start event dispatcher
     dispatcher(bot, db).await;
 }
@@ -108,13 +117,12 @@ async fn callback_handler(
     bot: Bot,
     callback_query: CallbackQuery,
     db: Surreal<DbClient>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> HandlerResult {
     debug!("Processing callback query...");
     let message = callback_query.regular_message().unwrap();
 
     // Retrieve task states for current chat
-    let task_states_from_db =
-        TaskState::select_from_db_by_chat_id(message.chat.id, db.clone()).await?;
+    let task_states_from_db = TaskState::from_db_by_chat_id(message.chat.id, db.clone()).await?;
 
     // Filter for 'New' state tasks
     let states_new: Vec<TaskState> = task_states_from_db
@@ -129,7 +137,7 @@ async fn callback_handler(
     };
 
     // Map callback data to media type
-    let media_type = match FileType::from_callback_data(data) {
+    let media_type = match MediaType::from_callback_data(data) {
         Some(mt) => mt,
         None => {
             bot.answer_callback_query(callback_query.id)
@@ -145,18 +153,8 @@ async fn callback_handler(
     let text = format!("Selected {media_type}. Please send the content URL.");
 
     // Transition task state from New to WaitingForUrl
-    let mut task_state_that_is_new = states_new[0].clone();
-    let mut_task_session = task_state_that_is_new.as_mut_session();
-    mut_task_session.set_media_type(media_type);
-    let task_state_that_is_waiting_for_url = task_state_that_is_new.to_waiting_for_url();
-
-    // Update database state
-    task_state_that_is_waiting_for_url
-        .delete_by_task_id(db.clone())
-        .await?;
-    task_state_that_is_waiting_for_url
-        .intodb(db.clone())
-        .await?;
+    let mut task_state = states_new[0].clone();
+    task_state.to_waiting_for_url(media_type, db.clone()).await;
 
     // Update message with next instructions
     if let Err(e) = bot.edit_message_text(chat_id, message.id, &text).await {
@@ -173,7 +171,7 @@ async fn message_handler(
     msg_from_user: Message,
     me: Me,
     db: Surreal<DbClient>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> HandlerResult {
     let chat_id = msg_from_user.chat.id;
 
     // Process text commands
@@ -183,22 +181,25 @@ async fn message_handler(
                 // Initialize new task session
                 let task_state = TaskState::try_from(&msg_from_user)?;
                 task_state.intodb(db.clone()).await?;
-                let task_session = task_state.session();
+
+                let task_session = task_state.get_inner_task_simple().unwrap();
                 task_session
                     .remember_related_message(&msg_from_user, db.clone())
                     .await?;
-
                 // Retrieve clearable tasks (New/WaitingForUrl states)
-                let task_states = TaskState::select_from_db_by_chat_id(chat_id, db.clone()).await?;
+                let task_states = TaskState::from_db_by_chat_id(chat_id, db.clone()).await?;
                 let clearable_tasks: Vec<TaskState> = task_states
                     .into_iter()
-                    .filter(|s| matches!(s, TaskState::New(_) | TaskState::WaitingForUrl(_) | TaskState::Failure(_)))
+                    .filter(|s| {
+                        matches!(
+                            s,
+                            TaskState::New(_) | TaskState::WaitingForUrl(_) | TaskState::Failure(_)
+                        )
+                    })
                     .collect();
-
                 // Purge task-related messages and data
                 for task in clearable_tasks {
                     let task_id = task.task_id();
-
                     // Delete tracked messages
                     let messages = TrackedMessage::from_db_by_task_id(task_id, db.clone()).await?;
                     for msg in messages {
@@ -215,7 +216,7 @@ async fn message_handler(
                 // Initialize new task session
                 let task_state = TaskState::try_from(&msg_from_user)?;
                 task_state.intodb(db.clone()).await?;
-                let task_session = task_state.session();
+                let task_session = task_state.get_inner_task_simple().unwrap();
                 task_session
                     .remember_related_message(&msg_from_user, db.clone())
                     .await?;
@@ -229,80 +230,137 @@ async fn message_handler(
                 return Ok(());
             }
             Err(_) => {
-                // Err represents an unknown command, it can be any message from user, in this case just track it
-                // Initialize new task session
-                let task_state = TaskState::try_from(&msg_from_user)?;
-                task_state.intodb(db.clone()).await?;
-                let task_session = task_state.session();
-                task_session
-                    .remember_related_message(&msg_from_user, db.clone())
-                    .await?;
-            }
-        }
-    }
+                // Err represents an unknown command, it can be any message from user, for example a random thanks or a URL that we wait
+                // Check for URL input in WaitingForUrl state
+                let task_states = TaskState::from_db_by_chat_id(chat_id, db.clone()).await?;
+                let waiting_states: Vec<TaskState> = task_states
+                    .into_iter()
+                    .filter(|s| matches!(s, TaskState::WaitingForUrl(_)))
+                    .collect();
 
-    // Check for URL input in WaitingForUrl state
-    let task_states = TaskState::select_from_db_by_chat_id(chat_id, db.clone())
-        .await
-        .expect("Database query failed");
-    let waiting_states: Vec<TaskState> = task_states
-        .into_iter()
-        .filter(|s| matches!(s, TaskState::WaitingForUrl(_)))
-        .collect();
+                match waiting_states.len() {
+                    // 0 means we don't wait for any URL, in this initialize task session and just track user's message
+                    0 => {
+                        let task_state = TaskState::try_from(&msg_from_user)?;
+                        task_state.intodb(db.clone()).await?;
+                        let task_session = task_state.get_inner_task_simple().unwrap();
+                        task_session
+                            .remember_related_message(&msg_from_user, db.clone())
+                            .await?;
+                    }
+                    // 1 or more means we expect a URL
+                    1.. => {
+                        let mut task_state = waiting_states[0].clone();
+                        let task_download_non_running =
+                            task_state.get_inner_task_download().unwrap();
 
-    match waiting_states.len() {
-        0 => {} // No URL expected
-        1.. => {
-            let task_state = waiting_states[0].clone();
-            let task_session = task_state.session();
+                        // Track user's message
+                        task_download_non_running
+                            .remember_related_message(&msg_from_user, db.clone())
+                            .await?;
 
-            // Track user's message containing URL
-            task_session
-                .remember_related_message(&msg_from_user, db.clone())
-                .await?;
-
-            // Process URL input
-            if let Some(raw_url) = msg_from_user.text() {
-                match Url::parse(raw_url) {
-                    Ok(url) => {
-                        // Mark task as running
-                        let running_state = task_state.clone().to_running();
-                        task_state.delete_by_task_id(db.clone()).await.ok();
-                        running_state.intodb(db.clone()).await.ok();
-                        let request_processing_result = task_session
-                            .process_request(
-                                url.to_string(),
-                                task_session.media_type.unwrap(),
-                                bot.clone(),
-                                db.clone(),
-                            )
-                            .await;
-                        match request_processing_result {
-                            Ok(_) => {
-                                // Mark task as successful
-                                let final_state = running_state.clone().to_success();
-                                running_state.delete_by_task_id(db.clone()).await.ok();
-                                final_state.intodb(db.clone()).await.ok();
-                            }
-                            Err(e) => {
-                                // Mark task as failed
-                                warn!("{}", e);
-                                let final_state = running_state.clone().to_failure();
-                                running_state.delete_by_task_id(db.clone()).await.ok();
-                                final_state.intodb(db.clone()).await.ok();
+                        // Process URL input
+                        if let Some(raw_url) = msg_from_user.text() {
+                            match Url::parse(raw_url) {
+                                Ok(url) => {
+                                    // Mark task as running
+                                    task_state.to_running(url, db.clone()).await;
+                                    let task_download_running =
+                                        task_state.get_inner_task_download().unwrap();
+                                    let request_processing_result = task_download_running
+                                        .process_request(bot.clone(), db.clone())
+                                        .await;
+                                    match request_processing_result {
+                                        Ok(_) => {
+                                            // Mark task as successful
+                                            task_state.to_success(db.clone()).await;
+                                        }
+                                        Err(e) => {
+                                            // Mark task as failed
+                                            task_state.to_failure(db.clone()).await;
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    let text = format!("Invalid URL: {e}. Please try again");
+                                    task_download_non_running
+                                        .send_and_remember_msg(&text, bot.clone(), db.clone())
+                                        .await?;
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        let text = format!("Invalid URL: {e}. Please try again");
-                        task_session
-                            .send_and_remember_msg(&text, bot.clone(), db.clone())
-                            .await?;
+                        return Ok(());
                     }
                 }
             }
-            return Ok(());
         }
     }
+
     Ok(())
 }
+
+// This is a dangerous function. It does correctly resume tasks but it can result in a dead loop
+// where some running task crashes a program, then crashes it again and again when entering this function on boot
+// enable at your own risk
+// #[tracing::instrument(skip_all)]
+// async fn finalize_interrupted_tasks(bot: Bot, db: Surreal<DbClient>) -> HandlerResult {
+//     // Filter only Running tasks
+//     let task_states = TaskState::from_db_all(db.clone()).await?;
+//     let running_states: Vec<TaskState> = task_states
+//         .into_iter()
+//         .filter(|s| matches!(s, TaskState::Running(_)))
+//         .collect();
+
+//     info!(
+//         "Found {} interrupted tasks to finalize.",
+//         running_states.len()
+//     );
+
+//     // Use JoinSet to manage and track all tasks
+//     let mut join_set = tokio::task::JoinSet::new();
+
+//     for mut task_state in running_states {
+//         // Separate variable needed to move it into async move.
+//         let bot_clone = bot.clone();
+//         let db_clone = db.clone();
+//         let finalizer_span = tracing::info_span!(
+//             "task_finalizer",
+//             task_id = ?task_state.task_id(),
+//         );
+//         join_set.spawn(
+//             async move {
+//                 // Safe unwrap due to prior filtering
+//                 let task_download = task_state
+//                     .get_inner_task_download()
+//                     .expect("Filtered state should contain TaskDownload");
+
+//                 // Process with error logging
+//                 match task_download
+//                     .process_request(bot_clone, db_clone.clone())
+//                     .await
+//                 {
+//                     Ok(_) => {
+//                         info!("Successfully finalized task: {:?}.", task_state);
+//                         task_state.to_success(db_clone).await;
+//                     }
+//                     Err(e) => {
+//                         warn!("Failed to finalize task {:?}: {}.", task_state, e);
+//                         task_state.to_failure(db_clone).await;
+//                     }
+//                 }
+//             }
+//             .instrument(finalizer_span),
+//         );
+//     }
+
+//     // Wait for all tasks to complete with no time limit
+//     while let Some(res) = join_set.join_next().await {
+//         match res {
+//             Ok(_) => {} // Individual task results already logged
+//             Err(e) => error!("Task finalization panicked: {}", e),
+//         }
+//     }
+
+//     info!("All interrupted tasks finalized");
+//     Ok(())
+// }
