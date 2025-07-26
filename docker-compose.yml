@@ -14,9 +14,15 @@ services:
 
   surrealdb:
     image: surrealdb/surrealdb:v2.3.7
-    command: ["start", "--log", "info", "--user", "root", "--pass", "root", "memory"]
-    cap_drop:
-      - ALL
+    command: ["start", "--log", "info", "--user", "root", "--pass", "root", "surrealkv://surrealdata"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - surrealdata:/surrealdata:rw
+    user: root
     restart: always
     stop_grace_period: 0s
 
@@ -30,3 +36,6 @@ services:
       - ALL
     restart: always
     stop_grace_period: 0s
+
+volumes:
+  surrealdata: {}
