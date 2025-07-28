@@ -5,7 +5,6 @@ pub const FILE_STORAGE: &str = "/tmp/telepirate-downloads";
 mod database;
 mod engine;
 mod misc;
-mod pirate;
 mod task;
 mod tracing;
 mod trackedmessage;

@@ -9,14 +9,16 @@ use teloxide::{
     types::{InlineKeyboardButton, InlineKeyboardMarkup, Me},
     utils::command::BotCommands,
 };
-use tracing::{Instrument, debug, error, info, warn}; // Added warn for completeness
+use tracing::{debug, error, info, warn}; // Added warn for completeness
 use url::Url;
 
 use crate::{
     database::{self, DbRecord},
     misc::die,
-    pirate::MediaType,
-    task::{HasTaskId, Task, TaskState},
+    task::mediatype::MediaType,
+    task::state::TaskState,
+    task::traits::HasTaskId,
+    task::traits::Task,
     trackedmessage::TrackedMessage,
 };
 
@@ -112,13 +114,16 @@ fn make_keyboard() -> InlineKeyboardMarkup {
 }
 
 /// Handles callback queries from inline keyboards
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(user_id = %callback_query.from.id))]
 async fn callback_handler(
     bot: Bot,
     callback_query: CallbackQuery,
     db: Surreal<DbClient>,
 ) -> HandlerResult {
-    debug!("Processing callback query...");
+    let username = match callback_query.from.username.clone() {
+        Some(username) => username,
+        None => "noname".to_string(),
+    };
     let message = callback_query.regular_message().unwrap();
 
     // Retrieve task states for current chat
@@ -138,7 +143,10 @@ async fn callback_handler(
 
     // Map callback data to media type
     let media_type = match MediaType::from_callback_data(data) {
-        Some(mt) => mt,
+        Some(media_type) => {
+            info!("User @{} selected {}.", username, media_type);
+            media_type
+        }
         None => {
             bot.answer_callback_query(callback_query.id)
                 .text("Invalid selection")
@@ -164,20 +172,26 @@ async fn callback_handler(
     Ok(())
 }
 
-/// Handles incoming messages and commands
-#[tracing::instrument(skip_all)]
+// Handles incoming messages and commands, the unwrap in tracing macro is safe because all messages
+// that we process are from the real users with real IDs.
+#[tracing::instrument(skip_all, fields(user_id = %msg_from_user.from.clone().unwrap().id))]
 async fn message_handler(
     bot: Bot,
     msg_from_user: Message,
     me: Me,
     db: Surreal<DbClient>,
 ) -> HandlerResult {
+    let username = match msg_from_user.from.clone().unwrap().username {
+        Some(username) => username,
+        None => "noname".to_string(),
+    };
     let chat_id = msg_from_user.chat.id;
 
     // Process text commands
     if let Some(text) = msg_from_user.text() {
         match BotCommands::parse(text, me.username()) {
             Ok(Command::Clear) => {
+                info!("User @{username} did /clear ...");
                 // Initialize new task session
                 let task_state = TaskState::try_from(&msg_from_user)?;
                 task_state.intodb(db.clone()).await?;
@@ -213,6 +227,7 @@ async fn message_handler(
                 return Ok(());
             }
             Ok(Command::Start) | Ok(Command::Ask) => {
+                info!("User @{username} did /start or /ask ...");
                 // Initialize new task session
                 let task_state = TaskState::try_from(&msg_from_user)?;
                 task_state.intodb(db.clone()).await?;
@@ -231,6 +246,7 @@ async fn message_handler(
             }
             Err(_) => {
                 // Err represents an unknown command, it can be any message from user, for example a random thanks or a URL that we wait
+                info!("User @{username} said '{}'.", msg_from_user.text().unwrap());
                 // Check for URL input in WaitingForUrl state
                 let task_states = TaskState::from_db_by_chat_id(chat_id, db.clone()).await?;
                 let waiting_states: Vec<TaskState> = task_states
@@ -275,7 +291,7 @@ async fn message_handler(
                                             // Mark task as successful
                                             task_state.to_success(db.clone()).await;
                                         }
-                                        Err(e) => {
+                                        Err(_) => {
                                             // Mark task as failed
                                             task_state.to_failure(db.clone()).await;
                                         }

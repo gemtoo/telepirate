@@ -12,8 +12,11 @@ use tracing::{Instrument, debug, trace, warn};
 use crate::{
     database::DbRecord,
     misc::{FolderData, sleep},
-    pirate::{self, MediaType},
-    task::{HasChatId, HasTaskId, TaskId},
+    task::mediatype::MediaType,
+    task::{
+        id::TaskId,
+        traits::{HasChatId, HasTaskId},
+    },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +55,8 @@ impl TrackedMessage {
     ) -> Result<tokio::task::JoinHandle<()>, Box<dyn Error + Send + Sync>> {
         debug!("Starting poller task ...");
 
-        let path_to_downloads = pirate::construct_destination_path(self.task_id().to_string());
+        let path_to_downloads =
+            crate::task::download::construct_destination_path(self.task_id().to_string());
         if let Err(e) = std::fs::create_dir_all(&path_to_downloads) {
             return Err(format!("Failed to create directory: {e}").into());
         }
