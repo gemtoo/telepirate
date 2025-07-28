@@ -25,6 +25,8 @@ RUN cargo install --profile ${BUILD_PROFILE} --locked --path .
 FROM alpine:edge AS runtime
 RUN apk add --no-cache \
     ffmpeg \
+    imagemagick \
+    jpegoptim \
     ca-certificates \
     yt-dlp
 COPY --from=builder /usr/local/cargo/bin/telepirate /usr/bin/
