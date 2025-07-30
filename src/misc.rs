@@ -56,48 +56,55 @@ pub fn die(reason: impl Into<String>) -> ! {
     error!("{}", reason.into());
     std::process::exit(1);
 }
+
 pub struct FolderData {
     pub size_in_bytes: usize,
     pub file_count: usize,
 }
 
 impl FolderData {
-    // This function counts files and their respective size.
     pub fn from(path_to_directory: &str, extension: MediaType) -> Self {
         let extension_str = extension.as_str();
-        // Collect all files of a certain extension.
-        let files: Vec<DirEntry>;
-        if extension_str.contains("mp3") {
-            files = WalkDir::new(path_to_directory)
-                .into_iter()
-                .filter_map(|entry| entry.ok())
-                .filter(|entry| entry.path().is_file())
-                .filter(|entry| {
-                    entry.path().extension() == Some(std::ffi::OsStr::new(extension_str))
-                })
-                .collect();
-        } else {
-            files = WalkDir::new(path_to_directory)
-                .into_iter()
-                .filter_map(|entry| entry.ok())
-                .filter(|entry| entry.path().is_file())
-                // Filtering by extension is not used in non-mp3 cases because of how yt-dlp handles these files.
-                .collect();
-        }
-        let file_count = files.len();
-        let mut size_in_bytes = 0;
 
-        for entry in files {
+        // For counting video downloads, use jpg thumbnails, as yt-dlp intermediate objects are hard to track
+        let count_extension = if extension_str == "mp4" {
+            "jpg"
+        } else {
+            extension_str
+        };
+
+        // Collect files for counting (thumbnails for mp4, actual files for others)
+        let files_to_count_amount: Vec<DirEntry> = WalkDir::new(path_to_directory)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().is_file())
+            .filter(|entry| entry.path().extension() != Some(OsStr::new("part")))
+            .filter(|entry| entry.path().extension() == Some(OsStr::new(count_extension)))
+            .collect();
+
+        let file_count = files_to_count_amount.len();
+
+        // Calculate total size: use mp4 files for size if media type is mp4, otherwise use counted files
+        let mut size_in_bytes: usize = 0;
+
+        for entry in WalkDir::new(path_to_directory)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
             if entry.file_type().is_file() {
-                // This unwrap is ok as long as we run as root in Docker.
-                size_in_bytes += std::fs::metadata(entry.path()).unwrap().len() as usize;
+                // As per documentation, this unwrap returns errors for path values 
+                // that the program does not have permissions to access or if the path does not exist.
+                // This is not our case so this unwrap is safe.
+                size_in_bytes += entry.metadata().unwrap().len() as usize;
             }
         }
+
         FolderData {
             size_in_bytes,
             file_count,
         }
     }
+
     pub fn format_bytes_to_megabytes(&self) -> String {
         format!("{:.2} MB", self.size_in_bytes as f64 / (1024.0 * 1024.0))
     }
@@ -190,11 +197,16 @@ pub fn get_video_metadata(path: &PathBuf) -> Metadata {
     // Execute ffprobe command
     let output = match Command::new("ffprobe")
         .args([
-            "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height",
-            "-show_entries", "format=duration",
-            "-of", "json",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
             path_str,
         ])
         .output()
@@ -228,7 +240,7 @@ fn parse_ffprobe_output(json: &str) -> Result<Metadata, ()> {
         .as_u64()
         .map(|w| w as u32)
         .unwrap_or(0);
-    
+
     let height = value["streams"][0]["height"]
         .as_u64()
         .map(|h| h as u32)
