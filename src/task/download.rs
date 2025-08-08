@@ -164,6 +164,11 @@ impl TaskDownload {
         let path = PathBuf::from(absolute_destination_path);
         let ytd = YoutubeDL::new(&path, yt_dlp_args, self.url().unwrap().as_str())?;
         let ytdresult = tokio::task::spawn_blocking(move || ytd.download()).await?;
+        // yt-dlp can exit with error and this should be handled early
+        if let Err(e) = ytdresult {
+            let _ = tx.send(true);
+            return Err(Box::new(e));
+        }
         let mut paths: Vec<PathBuf> = Vec::new();
         let regex = Regex::new(r"(.*)(\.opus)").unwrap();
         let filepaths = glob(&format!(
@@ -203,16 +208,10 @@ impl TaskDownload {
         if file_amount == 0 {
             cleanup(absolute_destination_path.into());
             let error_text;
-            match ytdresult {
-                Ok(traceback) => {
-                    error_text =
-                        format!("{traceback:?}\n\nFiles larger than 2GB are not supported.");
-                }
-                Err(e) => {
-                    error_text = e.to_string();
-                }
-            }
-            return Err(error_text.into());
+            if let Ok(traceback) = ytdresult {
+                error_text = format!("{traceback:?}\n\nFiles larger than 2GB are not supported.");
+                return Err(error_text.into());
+            }            
         }
         // Stop poller task here.
         let _ = tx.send(true);
