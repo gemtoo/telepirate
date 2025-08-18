@@ -1,6 +1,6 @@
 [package]
 name = "telepirate"
-version = "1.7.6"
+version = "1.7.7"
 edition = "2024"
 
 [profile.dev]
@@ -24,11 +24,11 @@ codegen-units = 256
 
 [dependencies]
 ctrlc = { version = "3.4.7", features = ["termination"], default-features = false }
-glob = { version = "0.3.2", default-features = false }
+glob = { version = "0.3.3", default-features = false }
 humantime = { version = "2.2.0", default-features = false }
 log = { version = "0.4.27", default-features = false }
 regex = { version = "1.11.1", default-features = false }
-reqwest = { version = "0.12.22", default-features = false }
+reqwest = { version = "0.12.23", default-features = false }
 serde = { version = "1.0.219", default-features = false, features = ["derive"] }
 serde_json = "1.0.142"
 serde_type_name = { version = "0.2.0", default-features = false }
@@ -38,6 +38,6 @@ tokio = { version = "1.47.1", default-features = false, features = ["rt-multi-th
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
 url = { version = "2.5.4", default-features = false }
-uuid = { version = "1.17.0", default-features = false, features = ["serde", "v4"] }
+uuid = { version = "1.18.0", default-features = false, features = ["serde", "v4"] }
 walkdir = { version = "2.5.0", default-features = false }
 ytd-rs = { version = "0.1.7", features = ["yt-dlp"], default-features = false }

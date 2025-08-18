@@ -13,7 +13,7 @@ use crate::task::mediatype::MediaType;
 #[tracing::instrument(skip_all)]
 pub fn cleanup(absolute_destination_path: PathBuf) {
     trace!("Deleting files ...");
-    remove_dir_all(absolute_destination_path).unwrap();
+    let _ = remove_dir_all(absolute_destination_path);
 }
 
 pub fn update() {
@@ -92,7 +92,7 @@ impl FolderData {
             .filter_map(|e| e.ok())
         {
             if entry.file_type().is_file() {
-                // As per documentation, this unwrap returns errors for path values 
+                // As per documentation, this unwrap returns errors for path values
                 // that the program does not have permissions to access or if the path does not exist.
                 // This is not our case so this unwrap is safe.
                 size_in_bytes += entry.metadata().unwrap().len() as usize;
