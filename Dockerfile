@@ -23,11 +23,12 @@ COPY . .
 RUN cargo install --profile ${BUILD_PROFILE} --locked --path .
 
 FROM alpine:edge AS runtime
+# COPY first here is intentional because yt-dlp needs to be kept updated
+COPY --from=builder /usr/local/cargo/bin/telepirate /usr/bin/
 RUN apk add --no-cache \
     ffmpeg \
     imagemagick \
     jpegoptim \
     ca-certificates \
     yt-dlp
-COPY --from=builder /usr/local/cargo/bin/telepirate /usr/bin/
 ENTRYPOINT [ "telepirate" ]
