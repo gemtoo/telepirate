@@ -30,11 +30,7 @@ TELEGRAM_API_HASH=your_api_hash_from_step_2
 docker compose up -d
 ```
 7. Test the bot in Telegram.
-### Troubleshooting notes
- The bot uses `yt-dlp` as the backend to download files. Sometimes YouTube pushes an update that breaks older versions of `yt-dlp`. In this case the bot starts throwing various `yt-dlp` errors in chat. First, consider updating `yt-dlp` inside the container:
-```
-docker exec -it telepirate /bin/sh -c 'apk upgrade --no-cache'
-```
+### Notes
 When downloading entire channels, check if the server with the bot has enough disk space, there is no way for the bot to prematurely know how much free space is needed to cache all pending downloads.
-### Other notes
+
 Due to Telegram's compliance with local laws, bots like this are getting censored and chats with them become unavailable for AppStore and Google Play users. It is recommended to run your own private instance of a bot to avoid censorship for as long as possible. This bot is deleting files after the request is finalized, leaving no evidence of copyright violations. The evidence exists only at the time of the request processing, which is fairly quick. It also strips off the metadata from files to make its work even more discreet. So that no metadata or hashsum matching checks will identify "illegal" files. TelePirate has been flawlessly running in DMCA compliant environment that is known to quickly shut down servers for working with pirated stuff.
