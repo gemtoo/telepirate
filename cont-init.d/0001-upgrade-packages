@@ -1,0 +1,4 @@
+#!/usr/bin/with-contenv sh
+
+/sbin/apk upgrade --no-cache || true
+echo "Note: If packages have been upgraded, the errors are fine."
