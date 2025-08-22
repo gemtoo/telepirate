@@ -66,8 +66,8 @@ impl FolderData {
     pub fn from(path_to_directory: &str, extension: MediaType) -> Self {
         let extension_str = extension.as_str();
 
-        // For counting video downloads, use jpg thumbnails, as yt-dlp intermediate objects are hard to track
-        let count_extension = if extension_str == "mp4" {
+        // For counting video and voice downloads, use jpg thumbnails, as yt-dlp intermediate objects are hard to track
+        let count_extension = if extension_str == "mp4" || extension_str == "opus" {
             "jpg"
         } else {
             extension_str

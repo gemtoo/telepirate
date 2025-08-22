@@ -271,6 +271,8 @@ fn generate_yt_dlp_args(media_type: MediaType) -> Vec<Arg> {
                 Arg::new("--no-write-info-json"),
                 Arg::new("--no-embed-metadata"),
                 Arg::new("--extract-audio"),
+                Arg::new("--write-thumbnail"),
+                Arg::new_with_arg("--convert-thumbnails", "jpg"),
                 Arg::new_with_arg("--audio-format", "opus"),
                 Arg::new_with_arg("--audio-quality", "64K"),
             ]
