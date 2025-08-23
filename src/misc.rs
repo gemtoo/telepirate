@@ -8,8 +8,6 @@ use std::process::Command;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
-use crate::task::mediatype::MediaType;
-
 #[tracing::instrument(skip_all)]
 pub fn cleanup(absolute_destination_path: PathBuf) {
     trace!("Deleting files ...");
@@ -63,15 +61,7 @@ pub struct FolderData {
 }
 
 impl FolderData {
-    pub fn from(path_to_directory: &str, extension: MediaType) -> Self {
-        let extension_str = extension.as_str();
-
-        // For counting video and voice downloads, use jpg thumbnails, as yt-dlp intermediate objects are hard to track
-        let count_extension = if extension_str == "mp4" || extension_str == "opus" {
-            "jpg"
-        } else {
-            extension_str
-        };
+    pub fn from(path_to_directory: &str) -> Self {
 
         // Collect files for counting (thumbnails for mp4, actual files for others)
         let files_to_count_amount: Vec<DirEntry> = WalkDir::new(path_to_directory)
@@ -79,7 +69,8 @@ impl FolderData {
             .filter_map(|entry| entry.ok())
             .filter(|entry| entry.path().is_file())
             .filter(|entry| entry.path().extension() != Some(OsStr::new("part")))
-            .filter(|entry| entry.path().extension() == Some(OsStr::new(count_extension)))
+            // For counting all kinds of downloads, use jpg thumbnails, as yt-dlp intermediate objects are hard to track
+            .filter(|entry| entry.path().extension() == Some(OsStr::new("jpg")))
             .collect();
 
         let file_count = files_to_count_amount.len();

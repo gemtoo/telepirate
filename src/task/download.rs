@@ -71,7 +71,7 @@ impl TaskDownload {
         let (tx, rx) = watch::channel(false);
 
         let poller_handle = last_message
-            .directory_size_poller_and_mesage_updater(rx, self.media_type(), bot.clone())
+            .directory_size_poller_and_mesage_updater(rx, bot.clone())
             .await?;
         let downloads_result = self
             .download_and_send_files(tx, bot.clone(), db.clone())
@@ -245,6 +245,8 @@ fn generate_yt_dlp_args(media_type: MediaType) -> Vec<Arg> {
                 Arg::new("--no-write-info-json"),
                 Arg::new("--no-embed-metadata"),
                 Arg::new("--extract-audio"),
+                Arg::new("--write-thumbnail"),
+                Arg::new_with_arg("--convert-thumbnails", "jpg"),
                 Arg::new_with_arg("--audio-format", "mp3"),
                 Arg::new_with_arg("--audio-quality", "0"),
             ]
