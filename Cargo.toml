@@ -1,6 +1,6 @@
 [package]
 name = "telepirate"
-version = "1.7.11"
+version = "1.7.12"
 edition = "2024"
 
 [profile.dev]
@@ -13,8 +13,7 @@ strip = true
 opt-level = 0
 codegen-units = 256
 
-# These optimisations add hours to build time
-# binary optimisations are not a bottleneck of this program, this is why turned off
+# These optimisations add hours to build time binary optimisations are not a bottleneck of this program, this is why turned off
 # [profile.release]
 # strip = true
 # opt-level = 3

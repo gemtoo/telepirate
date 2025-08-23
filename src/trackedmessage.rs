@@ -81,7 +81,7 @@ impl TrackedMessage {
                         );
 
                         let update_text = format!(
-                            "Downloading... Please wait.\nFiles to send: {}.\nTotal size: {}.",
+                            "Downloading ... Please wait.\nFiles to send: {}.\nTotal size: {}.",
                             folder_data.file_count,
                             folder_data.format_bytes_to_megabytes(),
                         );
