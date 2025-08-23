@@ -7,7 +7,7 @@ RUN apk add --no-cache \
     openssl-dev \
     openssl-libs-static \
     musl-dev \
-    ca-certificates
+    ca-certificates || yes
 RUN cargo install cargo-chef --locked
 
 FROM chef AS planner
@@ -23,22 +23,35 @@ COPY . .
 RUN cargo install --profile ${BUILD_PROFILE} --locked --path .
 
 FROM alpine:edge AS runtime
-# Install s6-overlay init system
 ARG S6_OVERLAY_VERSION=3.2.1.0
-ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz /tmp
-RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz
-ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-x86_64.tar.xz /tmp
-RUN tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz
-ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-symlinks-noarch.tar.xz /tmp
-RUN tar -C / -Jxpf /tmp/s6-overlay-symlinks-noarch.tar.xz
+# Detect architecture and set S6_ARCH accordingly
+RUN S6_ARCH=$(uname -m) && \
+    case "${S6_ARCH}" in \
+        x86_64) S6_ARCH=x86_64 ;; \
+        aarch64) S6_ARCH=aarch64 ;; \
+        armv7l|armv6l) S6_ARCH=arm ;; \
+        riscv64) S6_ARCH=riscv64 ;; \
+        *) echo "Unsupported architecture: ${S6_ARCH}"; exit 1 ;; \
+    esac && \
+    echo "Detected architecture: ${S6_ARCH}" && \
+    wget -O /tmp/s6-overlay-noarch.tar.xz "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz" && \
+    wget -O /tmp/s6-overlay-arch.tar.xz "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-${S6_ARCH}.tar.xz" && \
+    wget -O /tmp/s6-overlay-symlinks.tar.xz "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-symlinks-noarch.tar.xz" && \
+    tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz && \
+    tar -C / -Jxpf /tmp/s6-overlay-arch.tar.xz && \
+    tar -C / -Jxpf /tmp/s6-overlay-symlinks.tar.xz && \
+    rm /tmp/s6-overlay-*.tar.xz
 # Check if crond is present in default Alpine, as it might change
 RUN command -v crond
 RUN apk add --no-cache \
+    bash \
     ffmpeg \
     imagemagick \
     jpegoptim \
     ca-certificates \
     yt-dlp
+# Bash is needed as the default shell in s6-overlay
+RUN ln -sf /bin/bash /bin/sh
 RUN echo '0 */6 * * * /sbin/apk upgrade' > /etc/crontabs/root
 COPY --chown=root:root --chmod=755 services.d /etc/services.d
 COPY --chown=root:root --chmod=755 cont-init.d /etc/cont-init.d

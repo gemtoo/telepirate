@@ -35,9 +35,9 @@ stages:
       # Use separate cache tags for dev vs prod.
       if [ "$CI_ENVIRONMENT_NAME" = "prod" ]; then
         CACHE_TAG="cache-image-prod"
-        # Public registry tags and building for arm64 are needed only when going public.
+        # Public registry tags and building for arm64 & riscv64 are needed only when going public.
         CONDITIONAL_FLAGS="\
-          --platform linux/amd64,linux/arm64 \
+          --platform linux/amd64,linux/arm64,linux/riscv64 \
           --build-arg BUILD_PROFILE=release \
           --tag ${PUB_CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_SEMANTIC_TAG} \
           --tag ${PUB_CI_REGISTRY_IMAGE}:latest"
