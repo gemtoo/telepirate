@@ -12,7 +12,6 @@ use tracing::{Instrument, debug, trace, warn};
 use crate::{
     database::DbRecord,
     misc::{FolderData, sleep},
-    task::mediatype::MediaType,
     task::{
         id::TaskId,
         traits::{HasChatId, HasTaskId},
@@ -46,11 +45,10 @@ impl TrackedMessage {
         };
         dummy.select_by_task_id(db).await
     }
-    #[tracing::instrument(skip(self, rx, filetype, bot))]
+    #[tracing::instrument(skip(self, rx, bot))]
     pub async fn directory_size_poller_and_mesage_updater(
         &self,
         rx: watch::Receiver<bool>,
-        filetype: MediaType,
         bot: Bot,
     ) -> Result<tokio::task::JoinHandle<()>, Box<dyn Error + Send + Sync>> {
         debug!("Starting poller task ...");
@@ -74,7 +72,7 @@ impl TrackedMessage {
                     while !*rx.borrow() {
                         sleep(5).await;
 
-                        let folder_data = FolderData::from(&path_to_downloads, filetype);
+                        let folder_data = FolderData::from(&path_to_downloads);
 
                         trace!(
                             "File count: {}. Size: {}.",
