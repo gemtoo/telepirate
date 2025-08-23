@@ -7,11 +7,6 @@ services:
     environment:
       - TELOXIDE_TOKEN=${TELOXIDE_TOKEN}
     env_file: ./.env
-    cap_add:
-      - SETGID
-      - SETUID
-    cap_drop:
-      - ALL
     restart: always
     stop_grace_period: 0s
 
@@ -30,13 +25,11 @@ services:
     stop_grace_period: 0s
 
   telegram-bot-api:
-    image: gemtoo/telegram-bot-api:latest
+    image: aiogram/telegram-bot-api:latest
     environment:
       - TELEGRAM_API_ID=${TELEGRAM_API_ID}
       - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
     env_file: ./.env
-    cap_drop:
-      - ALL
     restart: always
     stop_grace_period: 0s
 
