@@ -14,7 +14,7 @@ use surrealdb::{Surreal, engine::remote::ws::Client as DbClient};
 use teloxide::prelude::*;
 use teloxide::types::InputFile;
 use tokio::sync::watch;
-use tokio::sync::watch::Sender;
+use crate::trackedmessage::TrackedMessage;
 use url::Url;
 use ytd_rs::{Arg, YoutubeDL};
 
@@ -63,20 +63,14 @@ impl TaskDownload {
     pub async fn process_request(&self, bot: Bot, db: Surreal<DbClient>) -> HandlerResult {
         debug!("Processing request ...");
         let tracked_messages = self
-            .send_and_remember_msg("Downloading... Please wait.", bot.clone(), db.clone())
+            .send_and_remember_msg("Prepring the download ...", bot.clone(), db.clone())
             .await?;
 
         let last_message = tracked_messages[0].clone();
 
-        let (tx, rx) = watch::channel(false);
-
-        let poller_handle = last_message
-            .directory_size_poller_and_mesage_updater(rx, bot.clone())
-            .await?;
         let downloads_result = self
-            .download_and_send_files(tx, bot.clone(), db.clone())
+            .download_and_send_files(last_message, bot.clone(), db.clone())
             .await;
-        poller_handle.await?;
         match downloads_result {
             Err(error) => {
                 warn!("Download failed: {}", error);
@@ -150,10 +144,15 @@ impl TaskDownload {
     #[tracing::instrument(skip_all, fields(task_id = %self.task_id()))]
     async fn download_and_send_files(
         &self,
-        tx: Sender<bool>,
+        last_message: TrackedMessage,
         bot: Bot,
         db: Surreal<DbClient>,
     ) -> HandlerResult {
+        let (tx, rx) = watch::channel(false);
+
+        let poller_handle = last_message
+            .directory_size_poller_and_mesage_updater(rx, bot.clone())
+            .await?;
         let yt_dlp_args = generate_yt_dlp_args(self.media_type);
         debug!("Downloading ...");
         // UUID is used to name path so that a second concurrent Tokio task can gather info from that path.
@@ -201,17 +200,18 @@ impl TaskDownload {
         // because the previous if filesize < 2_000_000_000 condition ensures that no files larger than 2GB
         // will be added to the vector of paths, even if download is successful
         if file_amount == 0 {
+            let _ = tx.send(true);
+            // Await poller handle before cleanup to avoid sending incorrect data to user.
+            poller_handle.await?;
             cleanup(absolute_destination_path.into());
             let error_text;
             match ytdresult {
                 Ok(traceback) => {
-                    let _ = tx.send(true);
                     error_text =
                         format!("{traceback:?}\n\nFiles larger than 2GB are not supported.");
                     return Err(error_text.into());
                 }
                 Err(traceback) => {
-                    let _ = tx.send(true);
                     error_text =
                         format!("{traceback:?}");
                     return Err(error_text.into());
@@ -224,6 +224,8 @@ impl TaskDownload {
         for path in paths {
             self.send_file(&path, bot.clone(), db.clone()).await?;
         }
+        // Await poller handle before cleanup to avoid sending incorrect data to user.
+        poller_handle.await?;
         cleanup(absolute_destination_path.into());
         Ok(())
     }

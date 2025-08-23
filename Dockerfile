@@ -41,8 +41,6 @@ RUN S6_ARCH=$(uname -m) && \
     tar -C / -Jxpf /tmp/s6-overlay-arch.tar.xz && \
     tar -C / -Jxpf /tmp/s6-overlay-symlinks.tar.xz && \
     rm /tmp/s6-overlay-*.tar.xz
-# Check if crond is present in default Alpine, as it might change
-RUN command -v crond
 RUN apk add --no-cache \
     bash \
     ffmpeg \
@@ -50,6 +48,8 @@ RUN apk add --no-cache \
     jpegoptim \
     ca-certificates \
     yt-dlp
+# Check if crond is present in default Alpine, as it might change
+RUN command -v crond
 # Bash is needed as the default shell in s6-overlay
 RUN ln -sf /bin/bash /bin/sh
 RUN echo '0 */6 * * * /sbin/apk upgrade' > /etc/crontabs/root
