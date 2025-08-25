@@ -18,6 +18,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    environment:
+      SURREAL_SYNC_DATA: "true"
     volumes:
       - surrealdata:/surrealdata:rw
     user: root
