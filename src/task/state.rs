@@ -162,6 +162,7 @@ impl TaskState {
             let new_state = TaskState::Success(task_download.to_task_stats());
             new_state.update_by_task_id(db).await.unwrap();
             *self = new_state;
+            TASK_REGISTRY.remove_task(self.task_id());
         } else {
             die("Only TaskState::Running can use to_success method.");
         }
@@ -172,6 +173,7 @@ impl TaskState {
             let new_state = TaskState::Failure(task_download.to_task_stats());
             new_state.update_by_task_id(db).await.unwrap();
             *self = new_state;
+            TASK_REGISTRY.remove_task(self.task_id());
         } else {
             die("Only TaskState::Running can use to_failure method.");
         }
