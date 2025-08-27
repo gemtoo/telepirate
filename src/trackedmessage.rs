@@ -61,8 +61,8 @@ impl TrackedMessage {
 
         let owned_tracked_message = self.clone();
         let poller_span = tracing::info_span!(
-            "directory_size_poller_task",
-            task_id = ?self.task_id(),
+            "thread",
+            task_id = %self.task_id(),
         );
 
         let handle = tokio::spawn(

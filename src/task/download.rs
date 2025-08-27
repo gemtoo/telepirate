@@ -63,7 +63,7 @@ impl TaskDownload {
     pub async fn process_request(&self, bot: Bot, db: Surreal<DbClient>) -> HandlerResult {
         debug!("Processing request ...");
         let tracked_messages = self
-            .send_and_remember_msg("Prepring the download...", bot.clone(), db.clone())
+            .send_and_remember_msg("Preparing the download...", bot.clone(), db.clone())
             .await?;
 
         let last_message = tracked_messages[0].clone();
@@ -73,7 +73,7 @@ impl TaskDownload {
             .await;
         match downloads_result {
             Err(error) => {
-                warn!("Download failed: {}", error);
+                warn!("{error}");
                 self.send_and_remember_msg(&error.to_string(), bot.clone(), db)
                     .await?;
                 Err(error)
@@ -199,9 +199,8 @@ impl TaskDownload {
         }
         let file_amount = paths.len();
         trace!("{file_amount} {}(s) to send.", self.media_type());
-        // Why file amount 0 && Ok means that a file is larger than 2GB?
-        // because the previous if filesize < 2_000_000_000 condition ensures that no files larger than 2GB
-        // will be added to the vector of paths, even if download is successful
+        // If count of files is 0 then it is an error even if yt-dlp doesn't think so.
+        // For example a file can be larger than 2GB thus not sendable by the bot.
         if file_amount == 0 {
             poller_cancellation_token_tx.cancel();
             // Await poller handle before cleanup to avoid sending incorrect data to user.
@@ -210,13 +209,11 @@ impl TaskDownload {
             let error_text;
             match ytdresult {
                 Ok(traceback) => {
-                    error_text =
-                        format!("{traceback:?}\n\nFiles larger than 2GB are not supported.");
+                    error_text = format!("{traceback:?}");
                     return Err(error_text.into());
                 }
                 Err(traceback) => {
-                    error_text = format!("Download failed: {traceback:?}");
-                    return Err(error_text.into());
+                    return Err(traceback);
                 }
             }
         }
@@ -368,7 +365,7 @@ async fn yt_dlp(
             // Wait for the process to exit to avoid zombies
             let _ = child.wait().await;
             
-            Err("Operation cancelled".into())
+            Err("Operation cancelled.".into())
         }
     }
 }
