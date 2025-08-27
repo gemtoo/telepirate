@@ -9,18 +9,18 @@ use teloxide::{
     types::{InlineKeyboardButton, InlineKeyboardMarkup, Me},
     utils::command::BotCommands,
 };
-use tracing::{debug, error, info, warn}; // Added warn for completeness
+use tracing::{debug, error, info, warn};
 use url::Url;
 
 use crate::{
     database::{self, DbRecord},
     misc::die,
-    task::mediatype::MediaType,
-    task::state::TaskState,
-    task::traits::HasTaskId,
-    task::traits::Task,
+    task::{cancellation::{CancellationRegistry, TASK_REGISTRY}, mediatype::MediaType, state::TaskState, traits::{HasTaskId, Task}},
     trackedmessage::TrackedMessage,
 };
+
+use tokio_util::sync::CancellationToken;
+
 
 type HandlerResult = Result<(), Box<dyn Error + Send + Sync>>;
 
@@ -35,9 +35,11 @@ enum Command {
     Ask,
     /// Clear the chat
     Clear,
+    /// Stop all running tasks
+    Stop,
 }
 
-/// Initializes and configures the Telegram bot instance
+// Initializes and configures the Telegram bot instance
 #[tracing::instrument]
 fn bot_init() -> Bot {
     debug!("Initializing bot client ...");
@@ -60,12 +62,12 @@ fn bot_init() -> Bot {
     bot
 }
 
-/// Main entry point for bot execution
+// Main entry point for bot execution
 #[tracing::instrument]
 pub async fn run() {
     let bot = bot_init();
     let db = database::db_init().await;
-
+    CancellationRegistry::new();
     // Configure visible bot commands (exclude /start from UI)
     let mut commands = Command::bot_commands().to_vec();
     commands.retain(|c| c.command != "/start");
@@ -84,7 +86,7 @@ pub async fn run() {
     dispatcher(bot, db).await;
 }
 
-/// Configures update dispatcher with handlers
+// Configures update dispatcher with handlers
 #[tracing::instrument(skip_all)]
 async fn dispatcher(bot: Bot, db: Surreal<DbClient>) {
     let handler = dptree::entry()
@@ -99,7 +101,7 @@ async fn dispatcher(bot: Bot, db: Surreal<DbClient>) {
         .await;
 }
 
-/// Generates media type selection keyboard
+// Generates media type selection keyboard
 fn make_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![
@@ -113,7 +115,7 @@ fn make_keyboard() -> InlineKeyboardMarkup {
     ])
 }
 
-/// Handles callback queries from inline keyboards
+// Handles callback queries from inline keyboards
 #[tracing::instrument(skip_all, fields(user_id = %callback_query.from.id))]
 async fn callback_handler(
     bot: Bot,
@@ -190,6 +192,50 @@ async fn message_handler(
     // Process text commands
     if let Some(text) = msg_from_user.text() {
         match BotCommands::parse(text, me.username()) {
+            Ok(Command::Start) | Ok(Command::Ask) => {
+                info!("User @{username} did /start or /ask ...");
+                // Initialize new task session
+                let task_state = TaskState::try_from(&msg_from_user)?;
+                task_state.intodb(db.clone()).await?;
+                let task_session = task_state.get_inner_task_simple().unwrap();
+                task_session
+                    .remember_related_message(&msg_from_user, db.clone())
+                    .await?;
+
+                // Present media type selection
+                let keyboard = make_keyboard();
+                let text = "Select content type:";
+                task_session
+                    .send_and_remember_msg_with_keyboard(text, keyboard, bot.clone(), db.clone())
+                    .await?;
+                return Ok(());
+            }
+            Ok(Command::Stop) => {
+                info!("User @{username} did /stop ...");
+                // Initialize new task session
+                let task_state = TaskState::try_from(&msg_from_user)?;
+                task_state.intodb(db.clone()).await?;
+
+                let task_session = task_state.get_inner_task_simple().unwrap();
+                task_session
+                    .remember_related_message(&msg_from_user, db.clone())
+                    .await?;
+                // Retrieve stoppable tasks (Running state)
+                let task_states = TaskState::from_db_by_chat_id(chat_id, db.clone()).await?;
+                let stoppable_tasks: Vec<TaskState> = task_states
+                    .into_iter()
+                    .filter(|s| {
+                        matches!(
+                            s,
+                            TaskState::Running(_)
+                        )
+                    })
+                    .collect();
+                for task in stoppable_tasks {
+                    TASK_REGISTRY.cancel_task(task.task_id());
+                }
+                return Ok(());
+            }
             Ok(Command::Clear) => {
                 info!("User @{username} did /clear ...");
                 // Initialize new task session
@@ -224,24 +270,6 @@ async fn message_handler(
                     // Delete task state
                     task.delete_by_task_id(db.clone()).await?;
                 }
-                return Ok(());
-            }
-            Ok(Command::Start) | Ok(Command::Ask) => {
-                info!("User @{username} did /start or /ask ...");
-                // Initialize new task session
-                let task_state = TaskState::try_from(&msg_from_user)?;
-                task_state.intodb(db.clone()).await?;
-                let task_session = task_state.get_inner_task_simple().unwrap();
-                task_session
-                    .remember_related_message(&msg_from_user, db.clone())
-                    .await?;
-
-                // Present media type selection
-                let keyboard = make_keyboard();
-                let text = "Select content type:";
-                task_session
-                    .send_and_remember_msg_with_keyboard(text, keyboard, bot.clone(), db.clone())
-                    .await?;
                 return Ok(());
             }
             Err(_) => {
@@ -279,8 +307,10 @@ async fn message_handler(
                         if let Some(raw_url) = msg_from_user.text() {
                             match Url::parse(raw_url) {
                                 Ok(url) => {
+                                    // Create cancellation token for task, in case it needs to be stopped
+                                    let task_cancellation_token = CancellationToken::new();
                                     // Mark task as running
-                                    task_state.to_running(url, db.clone()).await;
+                                    task_state.to_running(url, db.clone(), task_cancellation_token).await;
                                     let task_download_running =
                                         task_state.get_inner_task_download().unwrap();
                                     let request_processing_result = task_download_running
