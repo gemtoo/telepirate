@@ -62,7 +62,6 @@ pub struct FolderData {
 
 impl FolderData {
     pub fn from(path_to_directory: &str) -> Self {
-
         // Collect files for counting (thumbnails for mp4, actual files for others)
         let files_to_count_amount: Vec<DirEntry> = WalkDir::new(path_to_directory)
             .into_iter()

@@ -3,6 +3,7 @@ use super::mediatype::MediaType;
 use super::stats::*;
 use super::traits::*;
 use crate::misc::*;
+use crate::trackedmessage::TrackedMessage;
 use glob::glob;
 use humantime::format_rfc3339_seconds as timestamp;
 use regex::Regex;
@@ -13,10 +14,9 @@ use std::time::SystemTime;
 use surrealdb::{Surreal, engine::remote::ws::Client as DbClient};
 use teloxide::prelude::*;
 use teloxide::types::InputFile;
-use tokio::sync::watch;
-use crate::trackedmessage::TrackedMessage;
+use tokio_util::sync::CancellationToken;
 use url::Url;
-use ytd_rs::{Arg, YoutubeDL};
+use crate::task::cancellation::TASK_REGISTRY;
 
 type HandlerResult = Result<(), Box<dyn Error + Send + Sync>>;
 
@@ -63,7 +63,7 @@ impl TaskDownload {
     pub async fn process_request(&self, bot: Bot, db: Surreal<DbClient>) -> HandlerResult {
         debug!("Processing request ...");
         let tracked_messages = self
-            .send_and_remember_msg("Prepring the download ...", bot.clone(), db.clone())
+            .send_and_remember_msg("Prepring the download...", bot.clone(), db.clone())
             .await?;
 
         let last_message = tracked_messages[0].clone();
@@ -148,21 +148,24 @@ impl TaskDownload {
         bot: Bot,
         db: Surreal<DbClient>,
     ) -> HandlerResult {
-        let (tx, rx) = watch::channel(false);
-
-        let poller_handle = last_message
-            .directory_size_poller_and_mesage_updater(rx, bot.clone())
-            .await?;
-        let yt_dlp_args = generate_yt_dlp_args(self.media_type);
-        debug!("Downloading ...");
+        let poller_cancellation_token_tx = CancellationToken::new();
+        let poller_cancellation_token_rx = poller_cancellation_token_tx.clone();
+        let bot_for_poller = bot.clone();
+        let poller_handle = tokio::spawn(async move {
+            if let Err(e) = last_message.directory_size_poller_and_message_updater(poller_cancellation_token_rx, bot_for_poller).await {
+                warn!("{}", e);
+            }
+        });
+        let yt_dlp_args = generate_yt_dlp_args(self.media_type, self.url.clone().unwrap());
         // UUID is used to name path so that a second concurrent Tokio task can gather info from that path.
         let absolute_destination_path = &construct_destination_path(self.task_id().to_string());
         // Cleanup here is needed in case the task was respawned after interruption.
         // We need to start from 0 because existing artifacts result in corrupted downloads.
         cleanup(absolute_destination_path.into());
         let path = PathBuf::from(absolute_destination_path);
-        let ytd = YoutubeDL::new(&path, yt_dlp_args, self.url().unwrap().as_str())?;
-        let ytdresult = tokio::task::spawn_blocking(move || ytd.download()).await?;
+        // This unwrap should work as long as the registry is implemented correctly
+        let task_cancellation_token = TASK_REGISTRY.get_token(self.task_id()).unwrap();
+        let ytdresult = yt_dlp(path, yt_dlp_args, task_cancellation_token).await;
         let mut paths: Vec<PathBuf> = Vec::new();
         let regex = Regex::new(r"(.*)(\.opus)").unwrap();
         let filepaths = glob(&format!(
@@ -200,7 +203,7 @@ impl TaskDownload {
         // because the previous if filesize < 2_000_000_000 condition ensures that no files larger than 2GB
         // will be added to the vector of paths, even if download is successful
         if file_amount == 0 {
-            let _ = tx.send(true);
+            poller_cancellation_token_tx.cancel();
             // Await poller handle before cleanup to avoid sending incorrect data to user.
             poller_handle.await?;
             cleanup(absolute_destination_path.into());
@@ -212,14 +215,13 @@ impl TaskDownload {
                     return Err(error_text.into());
                 }
                 Err(traceback) => {
-                    error_text =
-                        format!("{traceback:?}");
+                    error_text = format!("Download failed: {traceback:?}");
                     return Err(error_text.into());
                 }
             }
         }
         // Stop poller task here.
-        let _ = tx.send(true);
+        poller_cancellation_token_tx.cancel();
         // Send files in alphabetic order.
         for path in paths {
             self.send_file(&path, bot.clone(), db.clone()).await?;
@@ -236,50 +238,137 @@ pub fn construct_destination_path(task_id: String) -> String {
     format!("{FILE_STORAGE}/{task_id}")
 }
 
-fn generate_yt_dlp_args(media_type: MediaType) -> Vec<Arg> {
+fn generate_yt_dlp_args(media_type: MediaType, url: Url) -> Vec<String> {
     match media_type {
         MediaType::Mp3 => {
             vec![
-                Arg::new_with_arg("--concurrent-fragments", "1"),
-                Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
-                Arg::new_with_arg("--output", "%(title)s.mp3"),
-                Arg::new("--windows-filenames"),
-                Arg::new("--no-write-info-json"),
-                Arg::new("--no-embed-metadata"),
-                Arg::new("--extract-audio"),
-                Arg::new("--write-thumbnail"),
-                Arg::new_with_arg("--convert-thumbnails", "jpg"),
-                Arg::new_with_arg("--audio-format", "mp3"),
-                Arg::new_with_arg("--audio-quality", "0"),
+                String::from("--concurrent-fragments"),
+                String::from("1"),
+                String::from("--skip-playlist-after-errors"),
+                String::from("5000"),
+                String::from("--output"),
+                String::from("%(title)s.mp3"),
+                String::from("--windows-filenames"),
+                String::from("--no-write-info-json"),
+                String::from("--no-embed-metadata"),
+                String::from("--extract-audio"),
+                String::from("--write-thumbnail"),
+                String::from("--convert-thumbnails"),
+                String::from("jpg"),
+                String::from("--audio-format"),
+                String::from("mp3"),
+                String::from("--audio-quality"),
+                String::from("0"),
+                String::from(url),
             ]
         }
         MediaType::Mp4 => {
             vec![
-                Arg::new_with_arg("--concurrent-fragments", "1"),
-                Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
-                Arg::new_with_arg("--max-filesize", "2000M"),
-                Arg::new_with_arg("--output", "%(title)s.mp4"),
-                Arg::new("--windows-filenames"),
-                Arg::new("--no-write-info-json"),
-                Arg::new("--no-embed-metadata"),
-                Arg::new("--write-thumbnail"),
-                Arg::new_with_arg("--convert-thumbnails", "jpg"),
-                Arg::new_with_arg("--format", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"),
+                String::from("--concurrent-fragments"),
+                String::from("1"),
+                String::from("--skip-playlist-after-errors"),
+                String::from("5000"),
+                String::from("--max-filesize"),
+                String::from("2000M"),
+                String::from("--output"),
+                String::from("%(title)s.mp4"),
+                String::from("--windows-filenames"),
+                String::from("--no-write-info-json"),
+                String::from("--no-embed-metadata"),
+                String::from("--write-thumbnail"),
+                String::from("--convert-thumbnails"),
+                String::from("jpg"),
+                String::from("--format"),
+                String::from("bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"),
+                String::from(url),
             ]
         }
         MediaType::Voice => {
             vec![
-                Arg::new_with_arg("--concurrent-fragments", "1"),
-                Arg::new_with_arg("--skip-playlist-after-errors", "5000"),
-                Arg::new("--windows-filenames"),
-                Arg::new("--no-write-info-json"),
-                Arg::new("--no-embed-metadata"),
-                Arg::new("--extract-audio"),
-                Arg::new("--write-thumbnail"),
-                Arg::new_with_arg("--convert-thumbnails", "jpg"),
-                Arg::new_with_arg("--audio-format", "opus"),
-                Arg::new_with_arg("--audio-quality", "64K"),
+                String::from("--concurrent-fragments"),
+                String::from("1"),
+                String::from("--skip-playlist-after-errors"),
+                String::from("5000"),
+                String::from("--windows-filenames"),
+                String::from("--no-write-info-json"),
+                String::from("--no-embed-metadata"),
+                String::from("--extract-audio"),
+                String::from("--write-thumbnail"),
+                String::from("--convert-thumbnails"),
+                String::from("jpg"),
+                String::from("--audio-format"),
+                String::from("opus"),
+                String::from("--audio-quality"),
+                String::from("64K"),
+                String::from(url),
             ]
+        }
+    }
+}
+
+use tokio::process::Command;
+use tokio::io::AsyncReadExt;
+
+#[tracing::instrument(skip_all)]
+async fn yt_dlp(
+    path: PathBuf,
+    args: Vec<String>,
+    cancellation_token: CancellationToken,
+) -> Result<std::process::Output, Box<dyn Error + Send + Sync>> {
+    debug!("Downloading ...");
+    let mut cmd = Command::new("yt-dlp");
+    std::fs::create_dir_all(&path)?;
+    cmd.current_dir(&path)
+        .env("LC_ALL", "en_US.UTF-8")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    // Add all arguments
+    for arg in args {
+        cmd.arg(arg);
+    }
+
+    // Spawn the child process
+    let mut child = cmd.spawn()?;
+
+    // Use select! to wait for either completion or cancellation
+    tokio::select! {
+        // Wait for the process to complete normally
+        status = child.wait() => {
+            match status {
+                Ok(exit_status) => {
+                    // Read stdout and stderr
+                    let mut stdout = Vec::new();
+                    let mut stderr = Vec::new();
+                    
+                    if let Some(mut out) = child.stdout.take() {
+                        out.read_to_end(&mut stdout).await?;
+                    }
+                    
+                    if let Some(mut err) = child.stderr.take() {
+                        err.read_to_end(&mut stderr).await?;
+                    }
+                    
+                    Ok(std::process::Output {
+                        status: exit_status,
+                        stdout,
+                        stderr,
+                    })
+                }
+                Err(e) => Err(Box::new(e)),
+            }
+        }
+        // Handle cancellation
+        _ = cancellation_token.cancelled() => {
+            // Kill the child process
+            if let Err(e) = child.kill().await {
+                warn!("Failed to kill child process: {}", e);
+            }
+            
+            // Wait for the process to exit to avoid zombies
+            let _ = child.wait().await;
+            
+            Err("Operation cancelled".into())
         }
     }
 }

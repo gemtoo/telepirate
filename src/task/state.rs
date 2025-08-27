@@ -8,10 +8,13 @@ use crate::database::*;
 use crate::misc::die;
 use serde::{Deserialize, Serialize};
 use serde_type_name::type_name;
+use tokio_util::sync::CancellationToken;
 use std::error::Error;
 use surrealdb::{Surreal, engine::remote::ws::Client as DbClient};
 use teloxide::prelude::*;
 use url::Url;
+
+use super::cancellation::TASK_REGISTRY;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "state", content = "data")]
@@ -141,12 +144,14 @@ impl TaskState {
         }
     }
 
-    pub async fn to_running(&mut self, url: Url, db: Surreal<DbClient>) {
+    pub async fn to_running(&mut self, url: Url, db: Surreal<DbClient>, cancellation_token: CancellationToken) {
         if let TaskState::WaitingForUrl(task_download) = self {
             task_download.set_url(url);
             let new_state = TaskState::Running(task_download.clone());
             new_state.update_by_task_id(db).await.unwrap();
             *self = new_state;
+            // Register task in the CancellationRegistry
+            TASK_REGISTRY.register_task(self.task_id(), cancellation_token);
         } else {
             die("Only TaskState::WaitingForUrl can use to_running method.");
         }

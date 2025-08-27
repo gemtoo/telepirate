@@ -6,7 +6,7 @@ use surrealdb::{Surreal, engine::remote::ws::Client as DbClient};
 use teloxide::dispatching::dialogue::GetChatId;
 use teloxide::prelude::*;
 use teloxide::types::MessageId;
-use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, trace, warn};
 
 use crate::{
@@ -45,12 +45,12 @@ impl TrackedMessage {
         };
         dummy.select_by_task_id(db).await
     }
-    #[tracing::instrument(skip(self, rx, bot))]
-    pub async fn directory_size_poller_and_mesage_updater(
+    #[tracing::instrument(skip(self, cancellation_token_rx, bot))]
+    pub async fn directory_size_poller_and_message_updater(
         &self,
-        rx: watch::Receiver<bool>,
+        cancellation_token_rx: CancellationToken,
         bot: Bot,
-    ) -> Result<tokio::task::JoinHandle<()>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         debug!("Starting poller task ...");
 
         let path_to_downloads =
@@ -58,57 +58,80 @@ impl TrackedMessage {
         if let Err(e) = std::fs::create_dir_all(&path_to_downloads) {
             return Err(format!("Failed to create directory: {e}").into());
         }
+
         let owned_tracked_message = self.clone();
         let poller_span = tracing::info_span!(
             "directory_size_poller_task",
             task_id = ?self.task_id(),
         );
 
-        let handle = tokio::task::spawn(
-            {
-                async move {
-                    let mut previous_update_text = String::new();
+        let handle = tokio::spawn(
+            async move {
+                let mut previous_update_text = String::new();
+                let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+                // Sleep so that initial message is not updated too quickly.
+                sleep(5).await;
+                loop {
+                    tokio::select! {
+                        _ = cancellation_token_rx.cancelled() => {
+                            // Cancellation logic
+                            let update_text = "Downloading finalized.";
+                                if let Err(e) = bot
+                                    .clone()
+                                    .edit_message_text(
+                                        owned_tracked_message.chat_id(),
+                                        owned_tracked_message.message_id,
+                                        update_text,
+                                    )
+                                    .await
+                                {
+                                    warn!("Failed to update message: {}", e);
+                                }
+                            trace!("Poller task done.");
+                            break;
+                        }
+                        _ = interval.tick() => {
+                            // Directory polling and message update logic
+                            let folder_data = FolderData::from(&path_to_downloads);
 
-                    while !*rx.borrow() {
-                        sleep(5).await;
+                            trace!(
+                                "File count: {}. Size: {}.",
+                                folder_data.file_count,
+                                folder_data.format_bytes_to_megabytes()
+                            );
 
-                        let folder_data = FolderData::from(&path_to_downloads);
+                            let update_text = format!(
+                                "Downloading... Please wait.\nFiles to send: {}.\nTotal size: {}.",
+                                folder_data.file_count,
+                                folder_data.format_bytes_to_megabytes(),
+                            );
 
-                        trace!(
-                            "File count: {}. Size: {}.",
-                            folder_data.file_count,
-                            folder_data.format_bytes_to_megabytes()
-                        );
+                            if update_text != previous_update_text {
+                                previous_update_text = update_text.clone();
 
-                        let update_text = format!(
-                            "Downloading ... Please wait.\nFiles to send: {}.\nTotal size: {}.",
-                            folder_data.file_count,
-                            folder_data.format_bytes_to_megabytes(),
-                        );
-
-                        if update_text != previous_update_text {
-                            previous_update_text = update_text.clone();
-
-                            if let Err(e) = bot
-                                .clone()
-                                .edit_message_text(
-                                    owned_tracked_message.chat_id(),
-                                    owned_tracked_message.message_id,
-                                    &update_text,
-                                )
-                                .await
-                            {
-                                warn!("Failed to update message: {}", e);
+                                if let Err(e) = bot
+                                    .clone()
+                                    .edit_message_text(
+                                        owned_tracked_message.chat_id(),
+                                        owned_tracked_message.message_id,
+                                        &update_text,
+                                    )
+                                    .await
+                                {
+                                    warn!("Failed to update message: {}", e);
+                                }
                             }
                         }
                     }
-                    trace!("Poller task done.");
                 }
             }
             .instrument(poller_span),
         );
 
-        Ok(handle)
+        // Wait for the task to complete or be cancelled
+        handle.await?;
+
+        Ok(())
     }
 }
 
