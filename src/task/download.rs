@@ -305,6 +305,7 @@ fn generate_yt_dlp_args(media_type: MediaType, url: Url) -> Vec<String> {
 
 use tokio::process::Command;
 use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[tracing::instrument(skip_all)]
 async fn yt_dlp(
@@ -327,6 +328,31 @@ async fn yt_dlp(
 
     // Spawn the child process
     let mut child = cmd.spawn()?;
+    // Get handles to stdout and stderr
+    let stdout = child.stdout.take().expect("Failed to capture stdout");
+    let stderr = child.stderr.take().expect("Failed to capture stderr");
+
+    // Create readers for the streams
+    let mut stdout_reader = BufReader::new(stdout).lines();
+    let mut stderr_reader = BufReader::new(stderr).lines();
+    let current_span_1 = tracing::Span::current();
+    let current_span_2 = tracing::Span::current();
+
+    // Read from both streams concurrently
+    let stdout_task = tokio::spawn(async move {
+        while let Some(line) = stdout_reader.next_line().await.unwrap() {
+            tracing::trace!(parent: current_span_1.clone(), "stdout: {}", line);
+        }
+    });
+
+    let stderr_task = tokio::spawn(async move {
+        while let Some(line) = stderr_reader.next_line().await.unwrap() {
+            tracing::warn!(parent: current_span_2.clone(), "stderr: {}", line);
+        }
+    });
+
+    // Wait for the output processing tasks to complete
+    let _ = tokio::join!(stdout_task, stderr_task);
 
     // Use select! to wait for either completion or cancellation
     tokio::select! {
@@ -363,7 +389,7 @@ async fn yt_dlp(
             }
             
             // Wait for the process to exit to avoid zombies
-            let _ = child.wait().await;
+            let _ = child.wait_with_output().await;
             
             Err("Operation cancelled.".into())
         }
