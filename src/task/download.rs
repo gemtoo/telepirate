@@ -3,9 +3,12 @@ use super::mediatype::MediaType;
 use super::stats::*;
 use super::traits::*;
 use crate::misc::*;
+use crate::task::cancellation::TASK_REGISTRY;
 use crate::trackedmessage::TrackedMessage;
 use glob::glob;
 use humantime::format_rfc3339_seconds as timestamp;
+use nix::sys::signal::{self, Signal};
+use nix::unistd::Pid;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -14,9 +17,10 @@ use std::time::SystemTime;
 use surrealdb::{Surreal, engine::remote::ws::Client as DbClient};
 use teloxide::prelude::*;
 use teloxide::types::InputFile;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 use url::Url;
-use crate::task::cancellation::TASK_REGISTRY;
 
 type HandlerResult = Result<(), Box<dyn Error + Send + Sync>>;
 
@@ -152,7 +156,13 @@ impl TaskDownload {
         let poller_cancellation_token_rx = poller_cancellation_token_tx.clone();
         let bot_for_poller = bot.clone();
         let poller_handle = tokio::spawn(async move {
-            if let Err(e) = last_message.directory_size_poller_and_message_updater(poller_cancellation_token_rx, bot_for_poller).await {
+            if let Err(e) = last_message
+                .directory_size_poller_and_message_updater(
+                    poller_cancellation_token_rx,
+                    bot_for_poller,
+                )
+                .await
+            {
                 warn!("{}", e);
             }
         });
@@ -303,10 +313,6 @@ fn generate_yt_dlp_args(media_type: MediaType, url: Url) -> Vec<String> {
     }
 }
 
-use tokio::process::Command;
-use tokio::io::AsyncReadExt;
-use tokio::io::{AsyncBufReadExt, BufReader};
-
 #[tracing::instrument(skip_all)]
 async fn yt_dlp(
     path: PathBuf,
@@ -328,6 +334,7 @@ async fn yt_dlp(
 
     // Spawn the child process
     let mut child = cmd.spawn()?;
+
     // Get handles to stdout and stderr
     let stdout = child.stdout.take().expect("Failed to capture stdout");
     let stderr = child.stderr.take().expect("Failed to capture stderr");
@@ -335,63 +342,91 @@ async fn yt_dlp(
     // Create readers for the streams
     let mut stdout_reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
+
     let current_span_1 = tracing::Span::current();
     let current_span_2 = tracing::Span::current();
 
-    // Read from both streams concurrently
+    // Spawn tasks to process stdout and stderr
     let stdout_task = tokio::spawn(async move {
-        while let Some(line) = stdout_reader.next_line().await.unwrap() {
+        while let Ok(Some(line)) = stdout_reader.next_line().await {
             tracing::trace!(parent: current_span_1.clone(), "stdout: {}", line);
         }
     });
 
     let stderr_task = tokio::spawn(async move {
-        while let Some(line) = stderr_reader.next_line().await.unwrap() {
+        while let Ok(Some(line)) = stderr_reader.next_line().await {
             tracing::warn!(parent: current_span_2.clone(), "stderr: {}", line);
         }
     });
 
-    // Wait for the output processing tasks to complete
-    let _ = tokio::join!(stdout_task, stderr_task);
-
     // Use select! to wait for either completion or cancellation
-    tokio::select! {
+    let result = tokio::select! {
+        biased;
+        // Handle cancellation
+        _ = cancellation_token.cancelled() => {
+            // Send SIGTERM instead of SIGKILL
+            if let Some(pid) = child.id() {
+                let pid = Pid::from_raw(pid as i32);
+                if let Err(e) = signal::kill(pid, Signal::SIGTERM) {
+                    warn!("Failed to send SIGTERM to child process: {}", e);
+                }
+
+                // Wait a moment for graceful shutdown
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+                // If process is still running, force kill with SIGKILL
+                if let Err(e) = child.kill().await {
+                    warn!("Failed to kill child process: {}", e);
+                }
+            } else {
+                // Fallback to regular kill if no PID
+                if let Err(e) = child.kill().await {
+                    warn!("Failed to kill child process: {}", e);
+                }
+            }
+
+            // Wait for the process to exit
+            let _ = child.wait_with_output().await;
+
+            // Cancel the stream processing tasks
+            stdout_task.abort();
+            stderr_task.abort();
+
+            cleanup(path);
+            Err(Box::<dyn Error + Send + Sync>::from("Operation cancelled."))
+        }
+        // Timeout for a task is 3h (10800 seconds)
+        _ = tokio::time::sleep(std::time::Duration::from_secs(10800)) => {
+            // Handle timeout after 5 minutes
+            warn!("Process timed out after 5 minutes");
+            if let Err(e) = child.kill().await {
+                warn!("Failed to kill timed out process: {}", e);
+            }
+            let _ = child.wait_with_output().await;
+            cleanup(path);
+            Err("Operation timeout (3 hours).".into())
+        }
         // Wait for the process to complete normally
         status = child.wait() => {
             match status {
-                Ok(exit_status) => {
-                    // Read stdout and stderr
-                    let mut stdout = Vec::new();
-                    let mut stderr = Vec::new();
-                    
-                    if let Some(mut out) = child.stdout.take() {
-                        out.read_to_end(&mut stdout).await?;
-                    }
-                    
-                    if let Some(mut err) = child.stderr.take() {
-                        err.read_to_end(&mut stderr).await?;
-                    }
-                    
-                    Ok(std::process::Output {
-                        status: exit_status,
-                        stdout,
-                        stderr,
-                    })
+                Ok(_) => {
+                    // Wait for stream processing to complete
+                    let _ = tokio::join!(stdout_task, stderr_task);
+
+                    // Read any remaining output
+                    let output = child.wait_with_output().await?;
+
+                    Ok(output)
                 }
-                Err(e) => Err(Box::new(e)),
+                Err(e) => {
+                    // Cancel the stream processing tasks on error
+                    stdout_task.abort();
+                    stderr_task.abort();
+                    Err(Box::<dyn Error + Send + Sync>::from(e))
+                }
             }
         }
-        // Handle cancellation
-        _ = cancellation_token.cancelled() => {
-            // Kill the child process
-            if let Err(e) = child.kill().await {
-                warn!("Failed to kill child process: {}", e);
-            }
-            
-            // Wait for the process to exit to avoid zombies
-            let _ = child.wait_with_output().await;
-            
-            Err("Operation cancelled.".into())
-        }
-    }
+    };
+
+    Ok(result?)
 }
