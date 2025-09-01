@@ -6,8 +6,6 @@ use tokio_util::sync::CancellationToken;
 lazy_static::lazy_static! {
     pub static ref TASK_REGISTRY: CancellationRegistry = CancellationRegistry::new();
 }
-use crate::task::download::construct_destination_path;
-use crate::misc::cleanup;
 use crate::task::id::TaskId;
 
 // Global registry to track currently Running tasks and their cancellation tokens.
@@ -36,8 +34,6 @@ impl CancellationRegistry {
         let mut tasks = self.tasks.lock().unwrap();
         if let Some(token) = tasks.remove(&task_id) {
             token.cancel();
-            let downloads_path = construct_destination_path(task_id.to_string());
-            cleanup(downloads_path.into());
             true
         } else {
             false

@@ -26,19 +26,19 @@ pub trait DbRecord: Clone + Debug /*+ Display*/ + Serialize + DeserializeOwned +
         Ok(object_option)
     }
 
-    // #[tracing::instrument(skip(self, db), fields(task_id = %self.task_id()))]
-    // async fn fromdb(&self, db: Surreal<DbClient>) -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
-    //     let type_name = type_name(self)?;
-    //     trace!("{} ...", type_name);
-    //     let table_name = table_name(type_name);
-    //     // Manual query formatting required because SurrealDB's .bind() method
-    //     // would wrap the type name in quotes, making it invalid as a table identifier
-    //     let query_base = format!("SELECT * FROM {table_name}");
+    #[tracing::instrument(skip(self, db), fields(task_id = %self.task_id()))]
+    async fn from_db(&self, db: Surreal<DbClient>) -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
+        let type_name = type_name(self)?;
+        trace!("{} ...", type_name);
+        let table_name = table_name(type_name);
+        // Manual query formatting required because SurrealDB's .bind() method
+        // would wrap the type name in quotes, making it invalid as a table identifier
+        let query_base = format!("SELECT * FROM {table_name}");
 
-    //     // Execute parameterized query
-    //     let object_array: Vec<Self> = db.query(&query_base).await?.take(0)?;
-    //     Ok(object_array)
-    // }
+        // Execute parameterized query
+        let object_array: Vec<Self> = db.query(&query_base).await?.take(0)?;
+        Ok(object_array)
+    }
 
     #[tracing::instrument(skip(self, db), fields(task_id = %self.task_id()))]
     async fn select_by_task_id(&self, db: Surreal<DbClient>) -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {

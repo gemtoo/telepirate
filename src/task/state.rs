@@ -8,10 +8,10 @@ use crate::database::*;
 use crate::misc::die;
 use serde::{Deserialize, Serialize};
 use serde_type_name::type_name;
-use tokio_util::sync::CancellationToken;
 use std::error::Error;
 use surrealdb::{Surreal, engine::remote::ws::Client as DbClient};
 use teloxide::prelude::*;
+use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use super::cancellation::TASK_REGISTRY;
@@ -124,16 +124,16 @@ impl TaskState {
         let dummy_task_state = Self::New(dummy_task_simple);
         return dummy_task_state.select_by_chat_id(db).await;
     }
-    // pub async fn from_db_all(
-    //     db: Surreal<DbClient>,
-    // ) -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
-    //     let dummy_task_simple = TaskSimple {
-    //         task_id: TaskId::new(),
-    //         chat_id: ChatId(0),
-    //     };
-    //     let dummy_task_state = Self::New(dummy_task_simple);
-    //     return dummy_task_state.fromdb(db).await;
-    // }
+    pub async fn from_db_all(
+        db: Surreal<DbClient>,
+    ) -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
+        let dummy_task_simple = TaskSimple {
+            task_id: TaskId::new(),
+            chat_id: ChatId(0),
+        };
+        let dummy_task_state = Self::New(dummy_task_simple);
+        return dummy_task_state.from_db(db).await;
+    }
     pub async fn to_waiting_for_url(&mut self, media_type: MediaType, db: Surreal<DbClient>) {
         if let TaskState::New(task_simple) = self {
             let new_state = TaskState::WaitingForUrl(task_simple.to_task_download(media_type));
@@ -144,7 +144,12 @@ impl TaskState {
         }
     }
 
-    pub async fn to_running(&mut self, url: Url, db: Surreal<DbClient>, cancellation_token: CancellationToken) {
+    pub async fn to_running(
+        &mut self,
+        url: Url,
+        db: Surreal<DbClient>,
+        cancellation_token: CancellationToken,
+    ) {
         if let TaskState::WaitingForUrl(task_download) = self {
             task_download.set_url(url);
             let new_state = TaskState::Running(task_download.clone());

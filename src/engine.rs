@@ -15,12 +15,16 @@ use url::Url;
 use crate::{
     database::{self, DbRecord},
     misc::die,
-    task::{cancellation::{CancellationRegistry, TASK_REGISTRY}, mediatype::MediaType, state::TaskState, traits::{HasTaskId, Task}},
+    task::{
+        cancellation::{CancellationRegistry, TASK_REGISTRY},
+        mediatype::MediaType,
+        state::TaskState,
+        traits::{HasTaskId, Task},
+    },
     trackedmessage::TrackedMessage,
 };
 
 use tokio_util::sync::CancellationToken;
-
 
 type HandlerResult = Result<(), Box<dyn Error + Send + Sync>>;
 
@@ -67,6 +71,17 @@ fn bot_init() -> Bot {
 pub async fn run() {
     let bot = bot_init();
     let db = database::db_init().await;
+    // On boot there can't be Running tasks. Finalize all Running tasks as Failed.
+    if let Ok(task_states) = TaskState::from_db_all(db.clone()).await {
+        let tasks: Vec<TaskState> = task_states
+            .into_iter()
+            .filter(|s| matches!(s, TaskState::Running(_)))
+            .collect();
+        for mut task in tasks {
+            task.to_failure(db.clone()).await
+        }
+    }
+    // Initialize cancellation registry.
     CancellationRegistry::new();
     // Configure visible bot commands (exclude /start from UI)
     let mut commands = Command::bot_commands().to_vec();
@@ -224,12 +239,7 @@ async fn message_handler(
                 let task_states = TaskState::from_db_by_chat_id(chat_id, db.clone()).await?;
                 let stoppable_tasks: Vec<TaskState> = task_states
                     .into_iter()
-                    .filter(|s| {
-                        matches!(
-                            s,
-                            TaskState::Running(_)
-                        )
-                    })
+                    .filter(|s| matches!(s, TaskState::Running(_)))
                     .collect();
                 for task in stoppable_tasks {
                     TASK_REGISTRY.cancel_task(task.task_id());
@@ -310,7 +320,9 @@ async fn message_handler(
                                     // Create cancellation token for task, in case it needs to be stopped
                                     let task_cancellation_token = CancellationToken::new();
                                     // Mark task as running
-                                    task_state.to_running(url, db.clone(), task_cancellation_token).await;
+                                    task_state
+                                        .to_running(url, db.clone(), task_cancellation_token)
+                                        .await;
                                     let task_download_running =
                                         task_state.get_inner_task_download().unwrap();
                                     let request_processing_result = task_download_running
