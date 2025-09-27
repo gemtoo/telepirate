@@ -297,12 +297,12 @@ async fn message_handler(
                     0 => {
                         // If a message doesn't contain audio, then track the message. This is done to avoid deletion of audios from the user.
                         if let None = msg_from_user.audio() {
-                        let task_state = TaskState::try_from(&msg_from_user)?;
-                        task_state.intodb(db.clone()).await?;
-                        let task_session = task_state.get_inner_task_simple().unwrap();
-                        task_session
-                            .remember_related_message(&msg_from_user, db.clone())
-                            .await?;
+                            let task_state = TaskState::try_from(&msg_from_user)?;
+                            task_state.intodb(db.clone()).await?;
+                            let task_session = task_state.get_inner_task_simple().unwrap();
+                            task_session
+                                .remember_related_message(&msg_from_user, db.clone())
+                                .await?;
                         }
                     }
                     // 1 or more means we expect a URL
