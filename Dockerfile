@@ -1,4 +1,4 @@
-FROM rust:1.89-alpine AS chef
+FROM rust:1.90-alpine AS chef
 # Default build profile is dev
 ARG BUILD_PROFILE=dev
 RUN apk add --no-cache \
@@ -22,7 +22,7 @@ RUN cargo chef cook --profile ${BUILD_PROFILE} --locked --recipe-path recipe.jso
 COPY . .
 RUN cargo install --profile ${BUILD_PROFILE} --locked --path .
 
-FROM alpine:edge AS runtime
+FROM alpine:3.22 AS runtime
 ARG S6_OVERLAY_VERSION=3.2.1.0
 # Detect architecture and set S6_ARCH accordingly
 RUN S6_ARCH=$(uname -m) && \
@@ -48,12 +48,14 @@ RUN apk add --no-cache \
     imagemagick \
     jpegoptim \
     ca-certificates \
-    yt-dlp || true
+    deno \
+    py3-pip || true
+RUN python3 -m pip install --break-system-packages -U "yt-dlp[default]"
 # Check if crond is present in default Alpine, as it might change
 RUN command -v crond
 # Bash is needed as the default shell in s6-overlay
 RUN ln -sf /bin/bash /bin/sh
-RUN echo '0 */6 * * * /sbin/apk upgrade' > /etc/crontabs/root
+RUN echo '0 */6 * * * /usr/bin/python3 -m pip install -U "yt-dlp[default]"' > /etc/crontabs/root
 COPY --chown=root:root --chmod=755 services.d /etc/services.d
 COPY --chown=root:root --chmod=755 cont-init.d /etc/cont-init.d
 COPY --from=builder /usr/local/cargo/bin/telepirate /usr/bin/
