@@ -1,6 +1,6 @@
 services:
   telepirate:
-    image: gemtoo/telepirate:1.8.6
+    image: gemtoo/telepirate:latest
     depends_on:
       - surrealdb
       - telegram-bot-api
