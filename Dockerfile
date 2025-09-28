@@ -55,7 +55,7 @@ RUN python3 -m pip install --break-system-packages -U "yt-dlp[default]"
 RUN command -v crond
 # Bash is needed as the default shell in s6-overlay
 RUN ln -sf /bin/bash /bin/sh
-RUN echo '0 */6 * * * /usr/bin/python3 -m pip install -U "yt-dlp[default]"' > /etc/crontabs/root
+RUN echo '0 */6 * * * /usr/bin/python3 -m pip install --break-system-packages -U "yt-dlp[default]" --root-user-action ignore' > /etc/crontabs/root
 COPY --chown=root:root --chmod=755 services.d /etc/services.d
 COPY --chown=root:root --chmod=755 cont-init.d /etc/cont-init.d
 COPY --from=builder /usr/local/cargo/bin/telepirate /usr/bin/
