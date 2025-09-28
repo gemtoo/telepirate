@@ -22,7 +22,7 @@ RUN cargo chef cook --profile ${BUILD_PROFILE} --locked --recipe-path recipe.jso
 COPY . .
 RUN cargo install --profile ${BUILD_PROFILE} --locked --path .
 
-FROM alpine:3.22 AS runtime
+FROM alpine:edge AS runtime
 ARG S6_OVERLAY_VERSION=3.2.1.0
 # Detect architecture and set S6_ARCH accordingly
 RUN S6_ARCH=$(uname -m) && \
@@ -50,7 +50,7 @@ RUN apk add --no-cache \
     ca-certificates \
     deno \
     py3-pip || true
-RUN python3 -m pip install --break-system-packages -U "yt-dlp[default]"
+RUN python3 -m pip install --break-system-packages -U "yt-dlp[default]" --root-user-action ignore
 # Check if crond is present in default Alpine, as it might change
 RUN command -v crond
 # Bash is needed as the default shell in s6-overlay

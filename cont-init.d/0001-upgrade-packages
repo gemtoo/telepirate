@@ -1,4 +1,4 @@
 #!/usr/bin/with-contenv sh
 
 /sbin/apk upgrade --no-cache || true
-echo "Note: If packages have been upgraded, the errors are fine."
+/usr/bin/python3 -m pip install --break-system-packages -U "yt-dlp[default]" --root-user-action ignore
