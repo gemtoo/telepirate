@@ -286,7 +286,11 @@ fn generate_yt_dlp_args(media_type: MediaType, url: Url) -> Vec<String> {
                 String::from("--convert-thumbnails"),
                 String::from("jpg"),
                 String::from("--format"),
-                String::from("bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"),
+                String::from("bestvideo+bestaudio/best"),
+                String::from("--merge-output-format"),
+                String::from("mp4"),
+                String::from("--recode-video"),
+                String::from("mp4"),
                 String::from(url),
             ]
         }
@@ -354,9 +358,12 @@ async fn yt_dlp(
     });
 
     let stderr_task = tokio::spawn(async move {
+        let mut error_traceback = String::new();
         while let Ok(Some(line)) = stderr_reader.next_line().await {
+            error_traceback += &line;
             tracing::warn!(parent: current_span_2.clone(), "stderr: {}", line);
         }
+        error_traceback
     });
 
     // Use select! to wait for either completion or cancellation
@@ -408,14 +415,14 @@ async fn yt_dlp(
         }
         // Wait for the process to complete normally
         status = child.wait() => {
+            // 
             match status {
                 Ok(_) => {
                     // Wait for stream processing to complete
-                    let _ = tokio::join!(stdout_task, stderr_task);
-
-                    // Read any remaining output
-                    let output = child.wait_with_output().await?;
-
+                    let (_, stderr) = tokio::join!(stdout_task, stderr_task);
+                    let stderr_bytes = stderr.unwrap().into_bytes();
+                    let mut output = child.wait_with_output().await?;
+                    output.stderr = stderr_bytes;
                     Ok(output)
                 }
                 Err(e) => {
