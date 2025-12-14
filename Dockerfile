@@ -1,4 +1,4 @@
-FROM rust:1.90-alpine AS chef
+FROM rust:1.92-alpine AS chef
 # Default build profile is dev
 ARG BUILD_PROFILE=dev
 RUN apk add --no-cache \
