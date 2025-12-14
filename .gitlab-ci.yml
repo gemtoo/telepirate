@@ -5,21 +5,21 @@ stages:
 .build-template: &build-template
   stage: build
   image:
-    name: docker:28-cli
+    name: docker:29-cli
     entrypoint: [""]
   services:
-    - name: docker:28-dind
+    - name: docker:29-dind
       alias: docker
       command:
         - dockerd
         - --host=tcp://0.0.0.0:2375
-        - --host=unix:///var/run/docker.sock
+        - --tlsverify
         - --storage-driver=overlay2
         - --ipv6
         - --fixed-cidr-v6=fd69:ace:ace::/80
   variables:
-    DOCKER_HOST: tcp://docker:2375/
-    DOCKER_TLS_CERTDIR: ""
+    DOCKER_HOST: tcp://docker:2375
+#    DOCKER_TLS_CERTDIR: ""
     DOCKER_BUILDKIT: 1
     BUILDKIT_PROGRESS: plain
     BUILDX_CACHE_FLAGS: ""
@@ -60,7 +60,7 @@ stages:
 
 .deploy-template: &deploy-template
   stage: deploy
-  image: docker:28-cli
+  image: docker:29-cli
   variables:
     COMPOSE_HTTP_TIMEOUT: 300
   before_script:
