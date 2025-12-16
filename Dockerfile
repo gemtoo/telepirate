@@ -7,7 +7,7 @@ RUN apk add --no-cache \
     openssl-dev \
     openssl-libs-static \
     musl-dev \
-    ca-certificates || yes
+    ca-certificates || true
 RUN cargo install cargo-chef --locked
 
 FROM chef AS planner
