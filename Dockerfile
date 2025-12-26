@@ -23,6 +23,7 @@ COPY . .
 RUN cargo install --profile ${BUILD_PROFILE} --locked --path .
 
 FROM alpine:edge AS runtime
+WORKDIR /app
 ARG S6_OVERLAY_VERSION=3.2.1.0
 # Detect architecture and set S6_ARCH accordingly
 RUN S6_ARCH=$(uname -m) && \
@@ -58,5 +59,6 @@ RUN ln -sf /bin/bash /bin/sh
 RUN echo '0 */6 * * * /usr/bin/python3 -m pip install --break-system-packages -U "yt-dlp[default]" --root-user-action ignore' > /etc/crontabs/root
 COPY --chown=root:root --chmod=755 services.d /etc/services.d
 COPY --chown=root:root --chmod=755 cont-init.d /etc/cont-init.d
-COPY --from=builder /usr/local/cargo/bin/telepirate /usr/bin/
+COPY --from=builder /usr/local/cargo/bin/telepirate /app
+COPY cookies /app/cookies
 ENTRYPOINT [ "/init" ]

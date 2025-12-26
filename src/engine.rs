@@ -319,7 +319,9 @@ async fn message_handler(
                         // Process URL input
                         if let Some(raw_url) = msg_from_user.text() {
                             match Url::parse(raw_url) {
-                                Ok(url) => {
+                                Ok(mut url) => {
+                                    // We don't need tracking, we don't trust yt-dlp to strip that part of the URL
+                                    url.set_query(None);
                                     // Create cancellation token for task, in case it needs to be stopped
                                     let task_cancellation_token = CancellationToken::new();
                                     // Mark task as running
