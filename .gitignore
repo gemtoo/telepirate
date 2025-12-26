@@ -10,4 +10,5 @@
 /src/downloads
 /.env
 /dbdata
-/cookies.txt
+/cookies/cookies.txt
+/history.txt

@@ -245,8 +245,14 @@ pub fn construct_destination_path(task_id: String) -> String {
     format!("{FILE_STORAGE}/{task_id}")
 }
 
+use std::path::Path;
+
 fn generate_yt_dlp_args(media_type: MediaType, url: Url) -> Vec<String> {
-    match media_type {
+    // Check if cookies file exists
+    let cookies_path = Path::new("/app/cookies/cookies.txt");
+    let has_cookies = cookies_path.exists();
+    
+    let mut base_args = match media_type {
         MediaType::Mp3 => {
             vec![
                 String::from("--concurrent-fragments"),
@@ -314,7 +320,16 @@ fn generate_yt_dlp_args(media_type: MediaType, url: Url) -> Vec<String> {
                 String::from(url),
             ]
         }
+    };
+    
+    // Insert cookies arguments at the beginning if cookies file exists
+    if has_cookies {
+        debug!("Using the provided cookies.txt file ...");
+        base_args.insert(0, String::from("--cookies"));
+        base_args.insert(1, String::from("/app/cookies/cookies.txt"));
     }
+    
+    base_args
 }
 
 #[tracing::instrument(skip_all)]

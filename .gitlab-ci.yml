@@ -46,6 +46,8 @@ stages:
           --platform linux/amd64\
           --build-arg BUILD_PROFILE=dev"
       fi
+      # Place cookies.txt in the context before building
+      cp -v "$COOKIES_TXT" ./cookies/cookies.txt
 
       docker buildx build \
         --push \

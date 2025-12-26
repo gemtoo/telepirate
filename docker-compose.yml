@@ -7,6 +7,8 @@ services:
     environment:
       - TELOXIDE_TOKEN=${TELOXIDE_TOKEN}
     env_file: ./.env
+    volumes:
+      - ./cookies:/app/cookies
     restart: always
     stop_grace_period: 0s
 

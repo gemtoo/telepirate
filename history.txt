@@ -1,7 +1,0 @@
-#V2
-ls -la
-delete TaskState_dev
-delete from TaskState_dev
-select * from TaskState_dev
-info for db;
-delete from TrackedMessage_dev

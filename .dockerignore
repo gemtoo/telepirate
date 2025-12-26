@@ -9,3 +9,5 @@
 /.gitignore
 /.gitlab-ci.yml
 /.env
+/history.txt
+/cookies/README.md
