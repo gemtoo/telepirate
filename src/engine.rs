@@ -124,8 +124,8 @@ fn make_keyboard() -> InlineKeyboardMarkup {
             InlineKeyboardButton::callback("Video", "Video"),
         ],
         vec![InlineKeyboardButton::callback(
-            "Audio as voice message",
-            "Audio as voice message",
+            "Voice",
+            "Voice",
         )],
     ])
 }

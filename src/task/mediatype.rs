@@ -20,7 +20,7 @@ impl MediaType {
         match data {
             "Audio" => Some(MediaType::Mp3),
             "Video" => Some(MediaType::Mp4),
-            "Audio as voice message" => Some(MediaType::Voice),
+            "Voice" => Some(MediaType::Voice),
             _ => None,
         }
     }
@@ -31,7 +31,7 @@ impl std::fmt::Display for MediaType {
         match self {
             MediaType::Mp3 => write!(f, "audio"),
             MediaType::Mp4 => write!(f, "video"),
-            MediaType::Voice => write!(f, "audio as voice message"),
+            MediaType::Voice => write!(f, "voice"),
         }
     }
 }

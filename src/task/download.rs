@@ -272,6 +272,10 @@ fn generate_yt_dlp_args(media_type: MediaType, url: Url) -> Vec<String> {
                 String::from("mp3"),
                 String::from("--audio-quality"),
                 String::from("0"),
+                String::from("--postprocessor-args"),
+                String::from("ffmpeg:-af silenceremove=1:0.3:-70dB"),
+                String::from("--sponsorblock-remove"),
+                String::from("sponsor"),
                 String::from(url),
             ]
         }
@@ -297,6 +301,8 @@ fn generate_yt_dlp_args(media_type: MediaType, url: Url) -> Vec<String> {
                 String::from("mp4"),
                 String::from("--recode-video"),
                 String::from("mp4"),
+                String::from("--sponsorblock-remove"),
+                String::from("sponsor"),
                 String::from(url),
             ]
         }
@@ -317,6 +323,8 @@ fn generate_yt_dlp_args(media_type: MediaType, url: Url) -> Vec<String> {
                 String::from("opus"),
                 String::from("--audio-quality"),
                 String::from("64K"),
+                String::from("--sponsorblock-remove"),
+                String::from("sponsor"),
                 String::from(url),
             ]
         }
