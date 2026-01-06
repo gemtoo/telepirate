@@ -42,6 +42,11 @@ RUN S6_ARCH=$(uname -m) && \
     tar -C / -Jxpf /tmp/s6-overlay-arch.tar.xz && \
     tar -C / -Jxpf /tmp/s6-overlay-symlinks.tar.xz && \
     rm /tmp/s6-overlay-*.tar.xz
+# Copy, update and upgrade stages are intentionally early to keep builds up to date
+COPY cookies /app/cookies
+COPY --chown=root:root --chmod=755 services.d /etc/services.d
+COPY --chown=root:root --chmod=755 cont-init.d /etc/cont-init.d
+COPY --from=builder /usr/local/cargo/bin/telepirate /app
 RUN apk upgrade || true
 RUN apk add --no-cache \
     bash \
@@ -54,11 +59,7 @@ RUN apk add --no-cache \
 RUN python3 -m pip install --break-system-packages -U "yt-dlp[default]" --root-user-action ignore
 # Check if crond is present in default Alpine, as it might change
 RUN command -v crond
+RUN echo '0 */6 * * * /usr/bin/python3 -m pip install --break-system-packages -U "yt-dlp[default]" --root-user-action ignore' > /etc/crontabs/root
 # Bash is needed as the default shell in s6-overlay
 RUN ln -sf /bin/bash /bin/sh
-RUN echo '0 */6 * * * /usr/bin/python3 -m pip install --break-system-packages -U "yt-dlp[default]" --root-user-action ignore' > /etc/crontabs/root
-COPY --chown=root:root --chmod=755 services.d /etc/services.d
-COPY --chown=root:root --chmod=755 cont-init.d /etc/cont-init.d
-COPY --from=builder /usr/local/cargo/bin/telepirate /app
-COPY cookies /app/cookies
 ENTRYPOINT [ "/init" ]
