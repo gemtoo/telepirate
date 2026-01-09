@@ -251,93 +251,67 @@ fn generate_yt_dlp_args(media_type: MediaType, url: Url) -> Vec<String> {
     // Check if cookies file exists
     let cookies_path = Path::new("/app/cookies/cookies.txt");
     let has_cookies = cookies_path.exists();
-    
-    let mut base_args = match media_type {
-        MediaType::Mp3 => {
-            vec![
-                String::from("--concurrent-fragments"),
-                String::from("1"),
-                String::from("--skip-playlist-after-errors"),
-                String::from("5000"),
-                String::from("--output"),
-                String::from("%(title)s.mp3"),
-                String::from("--windows-filenames"),
-                String::from("--no-write-info-json"),
-                String::from("--no-embed-metadata"),
-                String::from("--extract-audio"),
-                String::from("--write-thumbnail"),
-                String::from("--convert-thumbnails"),
-                String::from("jpg"),
-                String::from("--audio-format"),
-                String::from("mp3"),
-                String::from("--audio-quality"),
-                String::from("0"),
-                String::from("--postprocessor-args"),
-                String::from("ffmpeg:-af silenceremove=1:0.3:-70dB"),
-                String::from("--sponsorblock-remove"),
-                String::from("sponsor"),
-                String::from(url),
-            ]
-        }
-        MediaType::Mp4 => {
-            vec![
-                String::from("--concurrent-fragments"),
-                String::from("1"),
-                String::from("--skip-playlist-after-errors"),
-                String::from("5000"),
-                String::from("--max-filesize"),
-                String::from("2000M"),
-                String::from("--output"),
-                String::from("%(title)s.mp4"),
-                String::from("--windows-filenames"),
-                String::from("--no-write-info-json"),
-                String::from("--no-embed-metadata"),
-                String::from("--write-thumbnail"),
-                String::from("--convert-thumbnails"),
-                String::from("jpg"),
-                String::from("--format"),
-                String::from("bestvideo+bestaudio/best"),
-                String::from("--merge-output-format"),
-                String::from("mp4"),
-                String::from("--recode-video"),
-                String::from("mp4"),
-                String::from("--sponsorblock-remove"),
-                String::from("sponsor"),
-                String::from(url),
-            ]
-        }
-        MediaType::Voice => {
-            vec![
-                String::from("--concurrent-fragments"),
-                String::from("1"),
-                String::from("--skip-playlist-after-errors"),
-                String::from("5000"),
-                String::from("--windows-filenames"),
-                String::from("--no-write-info-json"),
-                String::from("--no-embed-metadata"),
-                String::from("--extract-audio"),
-                String::from("--write-thumbnail"),
-                String::from("--convert-thumbnails"),
-                String::from("jpg"),
-                String::from("--audio-format"),
-                String::from("opus"),
-                String::from("--audio-quality"),
-                String::from("64K"),
-                String::from("--sponsorblock-remove"),
-                String::from("sponsor"),
-                String::from(url),
-            ]
-        }
+    // Common arguments every branch should have
+    let mut args = vec![
+        String::from("--concurrent-fragments"),
+        String::from("1"),
+        String::from("--skip-playlist-after-errors"),
+        String::from("5000"),
+        String::from("--max-filesize"),
+        String::from("2000M"),
+        String::from("--windows-filenames"),
+        String::from("--no-write-info-json"),
+        String::from("--no-embed-metadata"),
+        String::from("--write-thumbnail"),
+        String::from("--convert-thumbnails"),
+        String::from("jpg"),
+        String::from("--sponsorblock-remove"),
+        String::from("sponsor"),
+    ];
+
+    // Media-specific arguments
+    match media_type {
+        MediaType::Mp3 => args.extend(vec![
+            String::from("--extract-audio"),
+            String::from("--output"),
+            String::from("%(title)s.mp3"),
+            String::from("--audio-format"),
+            String::from("mp3"),
+            String::from("--audio-quality"),
+            String::from("0"),
+            String::from("--postprocessor-args"),
+            String::from("ffmpeg:-af silenceremove=1:0.3:-80dB"),
+            String::from(url),
+        ]),
+        MediaType::Mp4 => args.extend(vec![
+            String::from("--output"),
+            String::from("%(title)s.mp4"),
+            String::from("--format"),
+            String::from("bestvideo+bestaudio/best"),
+            String::from("--merge-output-format"),
+            String::from("mp4"),
+            String::from("--recode-video"),
+            String::from("mp4"),
+            String::from(url),
+        ]),
+        MediaType::Voice => args.extend(vec![
+            String::from("--extract-audio"),
+            String::from("--audio-format"),
+            String::from("opus"),
+            String::from("--audio-quality"),
+            String::from("64K"),
+            String::from(url),
+        ]),
     };
-    
+
     // Insert cookies arguments at the beginning if cookies file exists
     if has_cookies {
         debug!("Using the provided cookies.txt file ...");
-        base_args.insert(0, String::from("--cookies"));
-        base_args.insert(1, String::from("/app/cookies/cookies.txt"));
+        args.insert(0, String::from("--cookies"));
+        args.insert(1, String::from("/app/cookies/cookies.txt"));
     }
-    
-    base_args
+
+    args
 }
 
 #[tracing::instrument(skip_all)]
@@ -438,7 +412,7 @@ async fn yt_dlp(
         }
         // Wait for the process to complete normally
         status = child.wait() => {
-            // 
+            //
             match status {
                 Ok(_) => {
                     // Wait for stream processing to complete

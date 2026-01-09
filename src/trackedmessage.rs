@@ -99,6 +99,10 @@ impl TrackedMessage {
                                 folder_data.file_count,
                                 folder_data.format_bytes_to_megabytes()
                             );
+                            // Skip updating message if no files yet, informing user of 0 files is confusing
+                            if folder_data.file_count == 0 {
+                                continue;
+                            }
 
                             let update_text = format!(
                                 "Downloading... Please wait.\nFiles to send: {}.\nTotal size: {}.",
