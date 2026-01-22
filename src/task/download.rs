@@ -279,8 +279,6 @@ fn generate_yt_dlp_args(media_type: MediaType, url: Url) -> Vec<String> {
             String::from("mp3"),
             String::from("--audio-quality"),
             String::from("0"),
-            String::from("--postprocessor-args"),
-            String::from("ffmpeg:-af silenceremove=1:0.3:-80dB"),
             String::from(url),
         ]),
         MediaType::Mp4 => args.extend(vec![
