@@ -7,8 +7,6 @@ use crate::task::cancellation::TASK_REGISTRY;
 use crate::trackedmessage::TrackedMessage;
 use glob::glob;
 use humantime::format_rfc3339_seconds as timestamp;
-use nix::sys::signal::{self, Signal};
-use nix::unistd::Pid;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -366,11 +364,23 @@ async fn yt_dlp(
         biased;
         // Handle cancellation
         _ = cancellation_token.cancelled() => {
-            // Send SIGTERM instead of SIGKILL
             if let Some(pid) = child.id() {
-                let pid = Pid::from_raw(pid as i32);
-                if let Err(e) = signal::kill(pid, Signal::SIGTERM) {
-                    warn!("Failed to send SIGTERM to child process: {}", e);
+                // Spawn the `kill` command with the PID as argument
+                let output = std::process::Command::new("kill")
+                    .arg(pid.to_string())
+                    .output();
+            
+                match output {
+                    Ok(o) if o.status.success() => {}
+                    Ok(o) => {
+                        warn!(
+                            "Failed to send SIGTERM to child process (pid {}): kill exited with {:?}",
+                            pid, o.status.code()
+                        );
+                    }
+                    Err(e) => {
+                        warn!("Failed to execute kill command: {}", e);
+                    }
                 }
 
                 // Wait a moment for graceful shutdown

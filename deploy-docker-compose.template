@@ -1,6 +1,6 @@
 services:
   telepirate-${CI_ENVIRONMENT_NAME}:
-    image: ${CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_SEMANTIC_TAG}
+    image: ${CI_REGISTRY_IMAGE}:latest
     environment:
       - TELOXIDE_TOKEN=${TELOXIDE_TOKEN}
     cap_add:

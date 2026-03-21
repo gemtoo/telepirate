@@ -14,8 +14,6 @@ stages:
         - dockerd
         - --host=tcp://0.0.0.0:2375
         - --storage-driver=overlay2
-        - --ipv6
-        - --fixed-cidr-v6=fd69:ace:ace::/80
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
@@ -28,6 +26,7 @@ stages:
       if [ "$CI_ENVIRONMENT_NAME" = "prod" ]; then
         echo "$PUB_CI_REGISTRY_PASSWORD" | docker login -u "$PUB_CI_REGISTRY_USER" --password-stdin $PUB_CI_REGISTRY
       fi
+    - DOCKER_IMAGE_SEMANTIC_TAG=$(cat Cargo.toml | grep "^version = \".*\"" | sed "s/^version = \"\(.*\)\"/\1/g")
   script:
     - docker buildx create --use --name cibuilder
     - |
@@ -51,7 +50,6 @@ stages:
 
       docker buildx build \
         --push \
-        --tag ${CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_HASH_TAG} \
         --tag ${CI_REGISTRY_IMAGE}:${DOCKER_IMAGE_SEMANTIC_TAG} \
         --tag ${CI_REGISTRY_IMAGE}:latest \
         --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/$CACHE_TAG,mode=max,compression=zstd \
@@ -74,8 +72,6 @@ stages:
     - ssh-keyscan $HOST >> ~/.ssh/known_hosts
     - echo "$CI_JOB_TOKEN" | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
   script:
-    - cp -v "$ENV" .env
-    - set -a && source .env && set +a
     # Production deployment should use image from the public registry.
     - |
       if [ "$CI_ENVIRONMENT_NAME" = "prod" ]; then
@@ -87,26 +83,6 @@ stages:
     - docker context ls
     - docker-compose --context remote -f deploy-docker-compose.yml pull -q
     - docker-compose --context remote -f deploy-docker-compose.yml up -d
-
-get_version:
-  stage: .pre
-  image:
-    name: alpine/git:latest
-    entrypoint: [""]
-  script:
-    - DOCKER_IMAGE_HASH_TAG=$(git describe --tags --always)
-    - DOCKER_IMAGE_SEMANTIC_TAG=$(cat Cargo.toml | grep "^version = \".*\"" | sed "s/^version = \"\(.*\)\"/\1/g")
-    - echo "DOCKER_IMAGE_HASH_TAG=${DOCKER_IMAGE_HASH_TAG}" >> build.env
-    - echo "DOCKER_IMAGE_SEMANTIC_TAG=${DOCKER_IMAGE_SEMANTIC_TAG}" >> build.env
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
-      when: always
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
-      when: always
-    - when: never
-  artifacts:
-    reports:
-      dotenv: build.env
 
 build_and_save_dev:
   <<: *build-template
