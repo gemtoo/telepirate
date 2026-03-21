@@ -9,8 +9,8 @@ use url::Url;
 pub struct TaskStats {
     pub task_id: TaskId,
     pub chat_id: ChatId,
-    pub media_type: MediaType,
-    pub url: Url,
+    pub media_type: Option<MediaType>,
+    pub url: Option<Url>,
     //started_at: Utc,
     //finished_at: Utc,
     //downloaded_size;

@@ -56,9 +56,9 @@ impl TaskDownload {
         TaskStats {
             task_id: self.task_id(),
             chat_id: self.chat_id(),
-            media_type: self.media_type(),
+            media_type: Some(self.media_type()),
             // This unwrap is safe because TaskState::Running is not possible without URL.
-            url: self.url().unwrap(),
+            url: self.url(),
         }
     }
     #[tracing::instrument(skip_all)]

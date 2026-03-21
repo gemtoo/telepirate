@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use teloxide::dispatching::dialogue::GetChatId;
 use teloxide::prelude::*;
+use crate::task::stats::TaskStats;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskSimple {
@@ -39,5 +40,14 @@ impl TaskSimple {
             media_type,
             url: None,
         }
+    }
+    pub fn to_task_stats(&self) -> TaskStats {
+            TaskStats {
+                task_id: self.task_id(),
+                chat_id: self.chat_id(),
+                media_type: None,
+                // This unwrap is safe because TaskState::Running is not possible without URL.
+                url: None,
+            }
     }
 }
