@@ -174,13 +174,22 @@ impl TaskState {
     }
 
     pub async fn to_failure(&mut self, db: Surreal<DbClient>) {
-        if let TaskState::Running(task_download) = self {
-            let new_state = TaskState::Failure(task_download.to_task_stats());
-            new_state.update_by_task_id(db).await.unwrap();
-            *self = new_state;
-            TASK_REGISTRY.remove_task(self.task_id());
-        } else {
-            die("Only TaskState::Running can use to_failure method.");
+        match self {
+            TaskState::WaitingForUrl(task_simple) => {
+                let new_state = TaskState::Failure(task_simple.to_task_stats());
+                new_state.update_by_task_id(db).await.unwrap();
+                *self = new_state;
+                TASK_REGISTRY.remove_task(self.task_id());
+            }
+            TaskState::Running(task_download) => {
+                let new_state = TaskState::Failure(task_download.to_task_stats());
+                new_state.update_by_task_id(db).await.unwrap();
+                *self = new_state;
+                TASK_REGISTRY.remove_task(self.task_id());       
+            }
+            _ => {
+                die("Only TaskState::Running or TaskState::WaitingForUrl can use to_failure method.");
+            }
         }
     }
     pub fn get_inner_task_simple(&self) -> Option<&TaskSimple> {

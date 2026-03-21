@@ -340,10 +340,11 @@ async fn message_handler(
                                     }
                                 }
                                 Err(e) => {
-                                    let text = format!("Invalid URL: {e}. Please try again");
+                                    let text = format!("Invalid URL: {e}.");
                                     task_download_non_running
                                         .send_and_remember_msg(&text, bot.clone(), db.clone())
                                         .await?;
+                                    task_state.to_failure(db.clone()).await;
                                 }
                             }
                         }
