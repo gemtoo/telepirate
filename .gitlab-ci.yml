@@ -26,7 +26,7 @@ stages:
       if [ "$CI_ENVIRONMENT_NAME" = "prod" ]; then
         echo "$PUB_CI_REGISTRY_PASSWORD" | docker login -u "$PUB_CI_REGISTRY_USER" --password-stdin $PUB_CI_REGISTRY
       fi
-    - DOCKER_IMAGE_SEMANTIC_TAG=v$(cat Cargo.toml | grep "^version = \".*\"" | sed "s/^version = \"\(.*\)\"/\1/g")
+    - DOCKER_IMAGE_SEMANTIC_TAG=$(cat Cargo.toml | grep "^version = \".*\"" | sed "s/^version = \"\(.*\)\"/\1/g")
   script:
     - docker buildx create --use --name cibuilder
     - |
