@@ -61,7 +61,7 @@ impl TrackedMessage {
 
         let owned_tracked_message = self.clone();
         let poller_span = tracing::info_span!(
-            "thread",
+            "th_message_updater",
             task_id = %self.task_id(),
         );
 
