@@ -19,7 +19,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 use url::Url;
-
+use tracing::Instrument;
 type HandlerResult = Result<(), Box<dyn Error + Send + Sync>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,7 +173,16 @@ impl TaskDownload {
         let path = PathBuf::from(absolute_destination_path);
         // This unwrap should work as long as the registry is implemented correctly
         let task_cancellation_token = TASK_REGISTRY.get_token(self.task_id()).unwrap();
-        let ytdresult = yt_dlp(path, yt_dlp_args, task_cancellation_token).await;
+        let downloader_span = tracing::info_span!(
+            "th_downloader",
+            task_id = %self.task_id(),
+        );
+        let downloader_handle = tokio::spawn(
+            async move {
+                yt_dlp(path, yt_dlp_args, task_cancellation_token).await
+            }.instrument(downloader_span)
+        );
+        let ytdresult = downloader_handle.await.unwrap();
         let mut paths: Vec<PathBuf> = Vec::new();
         let regex = Regex::new(r"(.*)(\.opus)").unwrap();
         let filepaths = glob(&format!(
